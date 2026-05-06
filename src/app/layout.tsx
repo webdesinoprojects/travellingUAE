@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope, Sora } from "next/font/google";
-import { FloatingSocial } from "@/components/layout/FloatingSocial";
-import { Header } from "@/components/layout/Header";
-import { WhatsAppButton } from "@/components/layout/WhatsAppButton";
+import { AppChrome } from "@/components/layout/AppChrome";
 import "./globals.css";
 
 const manrope = Manrope({
@@ -35,10 +33,7 @@ export default function RootLayout({
       className={`${manrope.variable} ${sora.variable} h-full scroll-smooth antialiased`}
     >
       <body className="min-h-full bg-background text-foreground">
-        <Header />
-        {children}
-        <WhatsAppButton />
-        <FloatingSocial />
+        <AppChrome>{children}</AppChrome>
       </body>
     </html>
   );

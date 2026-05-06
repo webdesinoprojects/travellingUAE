@@ -1,0 +1,1 @@
+-- Development seed data will be added after the admin CRUD shape is finalized.
