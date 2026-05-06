@@ -9,70 +9,70 @@ import type {
 } from "@/types/travel";
 
 export const navItems: NavItem[] = [
-  { label: "Flight", href: "#flight" },
-  { label: "Visas", href: "#visas", hasDropdown: true },
-  { label: "Tour Packages", href: "#packages", hasDropdown: true },
-  { label: "Wellness Packages", href: "#wellness" },
-  { label: "Services", href: "#services", hasDropdown: true },
+  { label: "Flights", href: "#flight" },
+  { label: "Visa Desk", href: "#visas", hasDropdown: true },
+  { label: "Holidays", href: "#packages", hasDropdown: true },
+  { label: "Wellness", href: "#wellness" },
+  { label: "Travel Desk", href: "#services", hasDropdown: true },
   { label: "Hajj & Umrah", href: "#hajj" },
-  { label: "Blogs", href: "#blogs" },
+  { label: "Journal", href: "#blogs" },
 ];
 
 export const heroTabs: HeroTab[] = [
-  { label: "Flight", icon: "flight" },
-  { label: "Hotels", icon: "hotel" },
-  { label: "Tour Packages", icon: "package" },
-  { label: "Wellness Packages", icon: "wellness" },
+  { label: "Flights", icon: "flight" },
+  { label: "Hotel Stays", icon: "hotel" },
+  { label: "Holiday Routes", icon: "package" },
+  { label: "Wellness Stays", icon: "wellness" },
   { label: "Cruise", icon: "cruise" },
-  { label: "Visas", icon: "visa" },
+  { label: "Visa Desk", icon: "visa" },
 ];
 
 export const exclusives: ProductCard[] = [
   {
-    title: "Best Wellness Packages",
+    title: "Reset Retreats",
     price: "INR 44,000",
     image:
       "https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=900&q=80",
     alt: "Wellness spa massage treatment in Kerala",
-    action: "Enquire Now",
+    action: "Plan Stay",
   },
   {
-    title: "Kerala Packages",
+    title: "Backwater Weekends",
     price: "INR 13,325",
     image:
       "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=900&q=80",
     alt: "Kerala backwaters with a houseboat and palm trees",
-    action: "Book Now",
+    action: "View Route",
   },
   {
-    title: "Affordable Air Tickets",
+    title: "Flexible Air Fares",
     price: "INR 16,799",
     image:
       "https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&fit=crop&w=900&q=80",
     alt: "Passenger airplane wing above clouds",
-    action: "Book Now",
+    action: "Search Fare",
   },
   {
-    title: "Kashmir 5N/6D",
+    title: "Snowline Holidays",
     price: "INR 16,500",
     image:
       "https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?auto=format&fit=crop&w=900&q=80",
     alt: "Snowy Kashmir valley and lake",
-    action: "Book Now",
+    action: "View Stay",
   },
   {
-    title: "Best Cruise Packages",
+    title: "Blue Water Cruises",
     price: "INR 33,990",
     image:
       "https://images.unsplash.com/photo-1548574505-5e239809ee19?auto=format&fit=crop&w=900&q=80",
     alt: "Large cruise ship at sea",
-    action: "Enquire Now",
+    action: "Plan Cruise",
   },
 ];
 
 export const bentoPackages: BentoPackage[] = [
   {
-    title: "Must Visit Nepal",
+    title: "Kathmandu & Peaks",
     price: "Starts INR 14,444",
     duration: "4 Nights / 5 Days",
     image:
@@ -81,7 +81,7 @@ export const bentoPackages: BentoPackage[] = [
     size: "featured",
   },
   {
-    title: "Viet Nam",
+    title: "Vietnam Coastline",
     price: "Starts INR 33,899",
     duration: "3 Nights / 4 Days",
     image:
@@ -90,7 +90,7 @@ export const bentoPackages: BentoPackage[] = [
     size: "small",
   },
   {
-    title: "Malaysia",
+    title: "Malaysia City Break",
     price: "Starts INR 27,666",
     duration: "3 Nights / 4 Days",
     image:
@@ -99,40 +99,41 @@ export const bentoPackages: BentoPackage[] = [
     size: "small",
   },
   {
-    title: "China",
-    price: "Starts INR 112,112",
-    duration: "6 Nights / 7 Days",
+    title: "Turkey Eid Route",
+    price: "Starts SAR 2,999",
+    duration: "3 Nights / 4 Days",
     image:
-      "https://images.unsplash.com/photo-1508804185872-d7badad00f7d?auto=format&fit=crop&w=1400&q=82",
-    alt: "Great Wall of China in warm evening light",
+      "https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?auto=format&fit=crop&w=1400&q=82",
+    alt: "Hot air balloons over a Turkey holiday landscape",
     size: "wide",
+    href: "/trips/turkey",
   },
 ];
 
 export const services: ServiceTile[] = [
   {
-    title: "Cruise",
+    title: "Cruise Desk",
     image:
       "https://images.unsplash.com/photo-1548574505-5e239809ee19?auto=format&fit=crop&w=700&q=80",
     alt: "Cruise ship sailing during sunset",
     icon: "cruise",
   },
   {
-    title: "Hotel Booking",
+    title: "Hotel Stays",
     image:
       "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=700&q=80",
     alt: "Luxury hotel building",
     icon: "hotel",
   },
   {
-    title: "Bus / Train Tickets",
+    title: "Rail & Coach",
     image:
       "https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?auto=format&fit=crop&w=700&q=80",
     alt: "Modern train platform",
     icon: "bus",
   },
   {
-    title: "Passport services",
+    title: "Passport Desk",
     image:
       "https://images.unsplash.com/photo-1542466500-dccb2789cbbb?auto=format&fit=crop&w=700&q=80",
     alt: "Passport and travel map",
@@ -146,7 +147,7 @@ export const services: ServiceTile[] = [
     icon: "document",
   },
   {
-    title: "Travel Insurance",
+    title: "Travel Cover",
     image:
       "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&w=700&q=80",
     alt: "Travel documents and insurance paperwork",
@@ -157,12 +158,12 @@ export const services: ServiceTile[] = [
 export const testimonials: Testimonial[] = [
   {
     quote:
-      "Smart Travel guided me and solved the visa issues in UAE. The team stayed clear, patient, and quick throughout.",
+      "Fly Time kept my UAE visa process calm and clear. I always knew the next step.",
     author: "Muhammed Ashik",
   },
   {
     quote:
-      "We had a great trip to Singapore planned by Smart Travel. Everything was well arranged and coordinated.",
+      "Our Singapore break felt organized from airport pickup to the last hotel checkout.",
     author: "Nekil Taji",
     image:
       "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=700&q=80",
@@ -170,12 +171,12 @@ export const testimonials: Testimonial[] = [
   },
   {
     quote:
-      "We had an amazing trip to Nepal, all thanks to the excellent planning and support from Smart Travel.",
+      "The Nepal route had the right pace, clean hotels, and support whenever we needed it.",
     author: "Arjun KS",
   },
   {
     quote:
-      "Recently I went to Nepal on a Smart Holiday and had a really good experience. Everything was arranged well.",
+      "The mountain stay was smooth, quiet, and easy to follow from the first call.",
     author: "Amritha K.S",
     image:
       "https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&w=700&q=80",
@@ -183,12 +184,12 @@ export const testimonials: Testimonial[] = [
   },
   {
     quote:
-      "I would like to express my sincere appreciation for arranging my recent trip to Phuket, Thailand.",
+      "Phuket was handled neatly: transfers, rooms, and activity options were all clear.",
     author: "Cedric Dsilva",
   },
   {
     quote:
-      "I chose Smart Travel as my travel guide and it was a great service. The team made the whole plan easy.",
+      "I picked Fly Time for a family holiday and the plan stayed simple the whole way.",
     author: "Rahul M R",
     image:
       "https://images.unsplash.com/photo-1551632811-561732d1e306?auto=format&fit=crop&w=700&q=80",
@@ -198,11 +199,11 @@ export const testimonials: Testimonial[] = [
 
 export const footerColumns: FooterColumn[] = [
   {
-    title: "Quick Links",
-    links: ["About Us", "Work with us", "Contact Us"],
+    title: "Company",
+    links: ["About Fly Time", "Work with us", "Contact desk"],
   },
   {
-    title: "Services",
+    title: "Travel Desk",
     links: [
       "India Tour Package",
       "International Tour Package",

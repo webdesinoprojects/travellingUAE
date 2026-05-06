@@ -2,10 +2,11 @@
 
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { exclusives } from "@/data/travel";
 
-const CARD_GAP = 12;
+const CARD_GAP = 16;
 
 export function SmartExclusives() {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -50,67 +51,83 @@ export function SmartExclusives() {
   }, []);
 
   return (
-    <section className="bg-background px-4 py-8 sm:px-6 lg:px-12 lg:py-8">
-      <div className="mx-auto max-w-[1590px]">
-        <div className="soft-card-shadow relative rounded-lg border border-border-soft bg-surface px-6 pb-7 pt-6 dark:bg-surface">
-          <h2 className="text-center font-serif text-4xl leading-tight text-slate-950 dark:text-white sm:text-[2.85rem] lg:text-[3rem]">
-            Smart Exclusives
-          </h2>
+    <section className="bg-background px-4 py-14 sm:px-6 lg:px-12">
+      <div className="mx-auto max-w-[1500px]">
+        <div className="relative">
+          <div className="flex flex-col justify-between gap-5 border-b border-border-soft pb-6 md:flex-row md:items-end">
+            <div>
+              <p className="text-sm font-extrabold uppercase text-brand-red">
+                Handpicked Deals
+              </p>
+              <h2 className="mt-2 font-serif text-4xl leading-[1.05] text-slate-950 dark:text-white sm:text-5xl">
+                Fly Time Picks
+              </h2>
+            </div>
+            <p className="max-w-xl text-sm leading-6 text-brand-blue/80 dark:text-brand-sky sm:text-base">
+              Seasonal offers with clear pricing, simple actions, and fast
+              paths into package details.
+            </p>
+          </div>
 
           <button
             type="button"
             aria-label="Previous exclusive"
             onClick={() => scrollByCard(-1)}
-            className="absolute -left-2 top-[53%] z-10 hidden h-12 w-[76px] -translate-y-1/2 place-items-center rounded-full bg-slate-500/35 text-white backdrop-blur transition hover:bg-brand-blue/80 md:grid"
+            className="absolute -left-3 top-[61%] z-10 hidden size-11 -translate-y-1/2 place-items-center rounded-lg border border-white/50 bg-slate-950/38 text-white backdrop-blur transition hover:bg-brand-red md:grid"
           >
-            <ArrowLeft aria-hidden="true" className="size-7" strokeWidth={1.7} />
+            <ArrowLeft aria-hidden="true" className="size-5" strokeWidth={2.1} />
           </button>
           <button
             type="button"
             aria-label="Next exclusive"
             onClick={() => scrollByCard(1)}
-            className="absolute -right-2 top-[53%] z-10 hidden h-12 w-[76px] -translate-y-1/2 place-items-center rounded-full bg-slate-500/35 text-white backdrop-blur transition hover:bg-brand-blue/80 md:grid"
+            className="absolute -right-3 top-[61%] z-10 hidden size-11 -translate-y-1/2 place-items-center rounded-lg border border-white/50 bg-slate-950/38 text-white backdrop-blur transition hover:bg-brand-red md:grid"
           >
-            <ArrowRight aria-hidden="true" className="size-7" strokeWidth={1.7} />
+            <ArrowRight aria-hidden="true" className="size-5" strokeWidth={2.1} />
           </button>
 
           <div
             ref={scrollerRef}
-            className="no-scrollbar mt-8 flex gap-3 overflow-x-auto scroll-smooth pb-1"
+            className="no-scrollbar mt-8 flex gap-4 overflow-x-auto scroll-smooth pb-2"
           >
             {exclusives.map((item) => (
               <article
                 key={item.title}
                 data-exclusive
-                className="w-[250px] flex-none rounded-lg bg-white p-0 dark:bg-neutral-950 sm:w-[318px] xl:w-[376px]"
+                className="modern-card group relative w-[255px] flex-none overflow-hidden rounded-lg bg-surface transition hover:-translate-y-0.5 sm:w-[314px] xl:w-[342px]"
               >
-                <div className="relative h-[245px] overflow-hidden rounded-lg sm:h-[292px] xl:h-[375px]">
+                <Link
+                  href={item.href ?? "/trips"}
+                  aria-label={`${item.action} for ${item.title}`}
+                  className="absolute inset-0 z-20"
+                />
+                <div className="relative h-[255px] overflow-hidden bg-surface-muted sm:h-[304px]">
                   <Image
                     src={item.image}
                     alt={item.alt}
                     fill
-                    sizes="(min-width: 1280px) 376px, (min-width: 640px) 330px, 250px"
-                    className="object-cover"
+                    sizes="(min-width: 1280px) 342px, (min-width: 640px) 314px, 255px"
+                    className="object-cover transition duration-500 group-hover:scale-[1.04]"
                   />
+                  <div className="absolute inset-0 bg-linear-to-t from-black/62 via-black/4 to-black/5" />
+                  <span className="absolute bottom-4 left-4 rounded-lg border border-white/35 bg-white/18 px-3 py-1.5 text-xs font-extrabold uppercase text-white backdrop-blur">
+                    {item.price}
+                  </span>
                 </div>
-                <div className="grid grid-cols-[1fr_auto] gap-4 py-3.5">
+                <div className="grid min-h-[120px] grid-cols-[1fr_auto] gap-4 p-4">
                   <div>
-                    <h3 className="text-[1.2rem] font-bold leading-tight text-slate-950 dark:text-white">
+                    <h3 className="text-[1.08rem] font-extrabold leading-tight text-slate-950 dark:text-white">
                       {item.title}
                     </h3>
-                    <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      Starts from
-                    </p>
-                    <p className="mt-1 text-[1.35rem] font-extrabold leading-none text-brand-blue">
-                      {item.price}
+                    <p className="mt-3 text-sm leading-6 text-brand-blue/78 dark:text-brand-sky">
+                      A clear next step for fares, stays, and holiday routes.
                     </p>
                   </div>
-                  <a
-                    href="#contact"
-                    className="self-end whitespace-nowrap rounded-lg border border-border-soft px-3.5 py-2 text-sm font-medium text-slate-900 transition hover:border-brand-blue hover:bg-brand-blue hover:text-white dark:text-white"
+                  <span
+                    className="self-end whitespace-nowrap rounded-lg bg-brand-blue px-3.5 py-2 text-xs font-extrabold text-white transition group-hover:bg-brand-navy dark:bg-brand-sand dark:text-brand-navy"
                   >
                     {item.action}
-                  </a>
+                  </span>
                 </div>
               </article>
             ))}

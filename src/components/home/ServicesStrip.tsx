@@ -1,39 +1,71 @@
+import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import { services } from "@/data/travel";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import { Marquee } from "@/components/ui/Marquee";
 import { TravelIcon } from "@/components/ui/TravelIcon";
 
 export function ServicesStrip() {
   return (
-    <section id="services" className="bg-background pt-16">
-      <SectionHeading title="Services" />
-      <div className="mt-8 grid grid-cols-1 gap-[3px] bg-background sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {services.map((service) => (
-          <article
-            key={service.title}
-            className="relative min-h-[340px] overflow-hidden bg-slate-900 text-white"
-          >
-            <Image
-              src={service.image}
-              alt={service.alt}
-              fill
-              sizes="(min-width: 1280px) 17vw, (min-width: 640px) 50vw, 100vw"
-              className="object-cover object-center"
-            />
-            <div className="absolute inset-0 bg-linear-to-b from-slate-950/25 via-transparent to-slate-950/60" />
-            <div className="absolute left-1/2 top-6 grid size-11 -translate-x-1/2 place-items-center rounded-lg bg-slate-900/35 backdrop-blur">
-              <TravelIcon icon={service.icon} className="size-5" />
-            </div>
-            <div className="absolute inset-x-0 bottom-7 flex justify-center px-5">
-              <a
-                href="#contact"
-                className="rounded-lg border border-white/40 bg-slate-950/45 px-5 py-3 text-sm font-bold backdrop-blur transition hover:bg-brand-blue"
-              >
-                {service.title}
-              </a>
-            </div>
-          </article>
-        ))}
+    <section id="services" className="bg-background px-4 py-16 sm:px-6 lg:px-10">
+      <div className="mx-auto max-w-[1240px]">
+        <SectionHeading
+          eyebrow="Support Desk"
+          title="What We Handle"
+          description="Flights, stays, visas and documents presented as simple service cards that work for quick enquiries."
+        />
+
+        <Marquee className="mx-auto mt-8 max-w-5xl [--duration:30s]">
+          {services.map((service) => (
+            <span
+              key={service.title}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-brand-brown/24 bg-brand-sand/60 px-4 text-sm font-extrabold text-brand-navy dark:border-white/12 dark:bg-white/[0.06] dark:text-white"
+            >
+              <TravelIcon icon={service.icon} className="size-4" />
+              {service.title}
+            </span>
+          ))}
+        </Marquee>
+
+        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {services.map((service) => (
+            <article
+              key={service.title}
+              className="modern-card group overflow-hidden bg-surface"
+            >
+              <div className="relative h-44 overflow-hidden bg-surface-muted">
+                <Image
+                  src={service.image}
+                  alt={service.alt}
+                  fill
+                  sizes="(min-width: 1024px) 400px, (min-width: 640px) 50vw, 100vw"
+                  className="object-cover transition duration-500 group-hover:scale-[1.04]"
+                />
+                <div className="absolute inset-0 bg-linear-to-t from-brand-navy/44 to-transparent" />
+                <div className="absolute left-4 top-4 grid size-11 place-items-center rounded-lg bg-white/90 text-brand-blue shadow-sm backdrop-blur dark:bg-brand-navy/80 dark:text-brand-sand">
+                  <TravelIcon icon={service.icon} className="size-5" />
+                </div>
+              </div>
+              <div className="flex min-h-[108px] items-end justify-between gap-4 p-4">
+                <div>
+                  <h3 className="text-lg font-extrabold text-brand-navy dark:text-white">
+                    {service.title}
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-brand-blue/76 dark:text-brand-sky">
+                    Straightforward help, tidy documents, and quick handoffs.
+                  </p>
+                </div>
+                <a
+                  href="#contact"
+                  aria-label={`Enquire about ${service.title}`}
+                  className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-blue text-white transition hover:bg-brand-navy dark:bg-brand-sand dark:text-brand-navy"
+                >
+                  <ArrowRight aria-hidden="true" className="size-5" />
+                </a>
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
   );

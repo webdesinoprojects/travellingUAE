@@ -1,52 +1,27 @@
 "use client";
 
-import { Menu } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Globe2, Menu } from "lucide-react";
 import { navItems } from "@/data/travel";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 export function Header() {
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    function handleScroll() {
-      const nextScrolled = window.scrollY > 24;
-      setScrolled((current) =>
-        current === nextScrolled ? current : nextScrolled,
-      );
-    }
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
   return (
     <header
-      className={[
-        "fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,box-shadow,color] duration-200",
-        scrolled
-          ? "border-b border-border-soft bg-white text-slate-950 shadow-[0_1px_8px_rgb(15_23_42/0.08)] dark:bg-black dark:text-white"
-          : "border-b border-transparent bg-transparent text-white",
-      ].join(" ")}
+      className="fixed inset-x-0 top-0 z-50 px-4 pt-3 text-foreground sm:px-6 lg:px-10"
     >
-      <div className="mx-auto flex h-16 w-full max-w-[1720px] items-center justify-between gap-5 px-4 sm:px-6 lg:px-12">
-        <BrandLogo tone={scrolled ? "dark" : "light"} size="sm" />
+      <div className="mx-auto flex h-[68px] w-full max-w-[1240px] items-center justify-between gap-4 rounded-lg border border-border-soft/80 bg-white/86 px-3 shadow-[0_18px_50px_rgb(7_23_57/0.12)] backdrop-blur-xl dark:bg-black/88">
+        <BrandLogo tone="dark" size="sm" />
 
         <nav
-          className="hidden items-center gap-5 text-sm font-semibold lg:flex"
+          className="hidden items-center gap-1 rounded-lg border border-border-soft bg-surface-muted/70 px-2 py-2 text-sm font-semibold lg:flex dark:bg-white/[0.06]"
           aria-label="Primary navigation"
         >
           {navItems.map((item) => (
             <a
               key={item.label}
               href={item.href}
-              className={[
-                "group inline-flex items-center gap-1.5 whitespace-nowrap transition",
-                scrolled
-                  ? "hover:text-brand-blue"
-                  : "drop-shadow-sm hover:text-white/80",
-              ].join(" ")}
+              className="group inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-brand-navy transition hover:bg-white hover:text-brand-blue dark:text-white dark:hover:bg-white/[0.08]"
             >
               {item.label}
               {item.hasDropdown ? (
@@ -59,38 +34,21 @@ export function Header() {
         <div className="flex items-center gap-3">
           <a
             href="#contact"
-            className={[
-              "hidden rounded-lg px-4 py-2 text-sm font-bold transition sm:inline-flex",
-              scrolled
-                ? "bg-brand-blue text-white hover:bg-brand-blue-strong"
-                : "border border-white/40 bg-white/10 text-white backdrop-blur hover:bg-white/20",
-            ].join(" ")}
+            className="hidden min-h-10 items-center rounded-lg bg-brand-blue px-5 text-sm font-bold text-white shadow-[0_10px_24px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy sm:inline-flex dark:bg-brand-sand dark:text-brand-navy"
           >
             Enquire
           </a>
-          <div className="hidden items-center gap-2 text-sm font-semibold md:flex">
-            <span aria-hidden="true" className="text-xl leading-none">
-              IN
-            </span>
+          <div className="hidden min-h-10 items-center gap-2 rounded-lg border border-border-soft bg-white/70 px-3 text-sm font-semibold text-brand-navy md:flex dark:bg-white/[0.06] dark:text-white">
+            <Globe2 aria-hidden="true" className="size-4" />
             <span>IND</span>
             <DownCaret />
           </div>
-          <div
-            className={[
-              "w-10 shrink-0 transition-opacity duration-200",
-              scrolled ? "opacity-100" : "pointer-events-none opacity-0",
-            ].join(" ")}
-          >
+          <div className="w-10 shrink-0">
             <ThemeToggle />
           </div>
           <details className="group relative lg:hidden">
             <summary
-              className={[
-                "grid size-10 list-none place-items-center rounded-lg border",
-                scrolled
-                  ? "border-border-soft bg-white text-slate-900 dark:bg-neutral-950 dark:text-white"
-                  : "border-white/40 bg-white/10 text-white backdrop-blur",
-              ].join(" ")}
+              className="grid size-10 list-none place-items-center rounded-lg border border-border-soft bg-white text-brand-navy dark:bg-white/[0.08] dark:text-white"
             >
               <Menu aria-hidden="true" className="size-5" />
               <span className="sr-only">Open menu</span>
@@ -101,7 +59,7 @@ export function Header() {
                   <a
                     key={item.label}
                     href={item.href}
-                    className="flex items-center justify-between rounded-md px-3 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-sky-50 hover:text-brand-blue dark:text-white dark:hover:bg-neutral-900"
+                    className="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-semibold text-brand-navy transition hover:bg-surface-strong hover:text-brand-blue dark:text-white dark:hover:bg-white/[0.08]"
                   >
                     {item.label}
                     {item.hasDropdown ? (

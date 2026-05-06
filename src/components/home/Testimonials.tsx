@@ -2,80 +2,97 @@ import Image from "next/image";
 import { testimonials } from "@/data/travel";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
+const bentoSpans = [
+  "lg:col-span-2",
+  "lg:col-span-1",
+  "lg:col-span-1",
+  "lg:col-span-1",
+  "lg:col-span-2",
+  "lg:col-span-1",
+];
+
 export function Testimonials() {
   return (
-    <section className="overflow-hidden bg-surface px-4 py-16 sm:px-6 lg:px-12 lg:py-20">
-      <SectionHeading
-        title="Hear From Our Travelers"
-        description="Experiences shared by our valuable customers who trust Smart Travel for unforgettable journeys."
-      />
+    <section className="bg-brand-sky/38 px-4 py-16 text-brand-navy dark:bg-brand-navy dark:text-white sm:px-6 lg:px-10">
+      <div className="mx-auto max-w-[1240px]">
+        <SectionHeading
+          eyebrow="Traveler Voices"
+          title="Stories From The Route"
+          description="A bento wall of recent traveler notes, built to scan quickly without turning the page into a review feed."
+        />
 
-      <div className="no-scrollbar mx-auto mt-10 flex max-w-[1700px] gap-6 overflow-x-auto pb-4 lg:grid lg:grid-cols-6 lg:items-center lg:gap-7 lg:overflow-visible">
-        {testimonials.map((testimonial, index) =>
-          testimonial.image ? (
-            <figure
+        <div className="mt-10 grid auto-rows-[238px] gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {testimonials.map((testimonial, index) => (
+            <article
               key={testimonial.author}
-              className="relative h-[250px] min-w-[260px] overflow-hidden rounded-lg lg:min-w-0"
+              className={[
+                "group relative overflow-hidden rounded-lg border border-brand-blue/15 bg-surface shadow-[0_16px_40px_rgb(7_23_57/0.08)] transition hover:-translate-y-0.5 dark:border-white/12 dark:bg-white/[0.045]",
+                bentoSpans[index] ?? "",
+              ].join(" ")}
             >
-              <Image
-                src={testimonial.image}
-                alt={testimonial.alt ?? testimonial.author}
-                fill
-                sizes="(min-width: 1024px) 260px, 260px"
-                className="object-cover"
-              />
-            </figure>
-          ) : (
-            <TestimonialCard
-              key={testimonial.author}
-              quote={testimonial.quote}
-              author={testimonial.author}
-              className={index % 2 === 0 ? "lg:translate-y-10" : ""}
-            />
-          ),
-        )}
+              {!testimonial.image ? (
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-0 bg-linear-to-br from-brand-sand/24 via-transparent to-brand-sky/18 dark:from-brand-sky/14 dark:to-transparent"
+                />
+              ) : null}
+              {testimonial.image ? (
+                <Image
+                  src={testimonial.image}
+                  alt={testimonial.alt ?? testimonial.author}
+                  fill
+                  sizes="(min-width: 1024px) 620px, (min-width: 768px) 50vw, 100vw"
+                  className="object-cover transition duration-500 group-hover:scale-[1.03]"
+                />
+              ) : null}
+              {testimonial.image ? (
+                <div className="absolute inset-0 bg-linear-to-t from-brand-navy/86 via-brand-navy/30 to-transparent" />
+              ) : null}
+              <div className="absolute inset-0 flex flex-col justify-end p-5">
+                <p
+                  className={[
+                    "text-4xl font-black leading-none",
+                    testimonial.image
+                      ? "text-brand-sand"
+                      : "text-brand-brown dark:text-brand-sand",
+                  ].join(" ")}
+                >
+                  &ldquo;
+                </p>
+                <p
+                  className={[
+                    "mt-2 max-w-xl text-[1rem] font-semibold leading-8",
+                    testimonial.image
+                      ? "text-white"
+                      : "text-brand-navy dark:text-white",
+                  ].join(" ")}
+                >
+                  {testimonial.quote}
+                </p>
+                <div className="mt-5 flex items-center gap-3">
+                  <span className="grid size-10 place-items-center rounded-lg bg-brand-sky text-xs font-extrabold text-brand-blue">
+                    {testimonial.author
+                      .split(" ")
+                      .slice(0, 2)
+                      .map((part) => part[0])
+                      .join("")}
+                  </span>
+                  <span
+                    className={[
+                      "text-sm font-extrabold",
+                      testimonial.image
+                        ? "text-white"
+                        : "text-brand-navy dark:text-white",
+                    ].join(" ")}
+                  >
+                    {testimonial.author}
+                  </span>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
-  );
-}
-
-function TestimonialCard({
-  quote,
-  author,
-  className,
-}: {
-  quote: string;
-  author: string;
-  className?: string;
-}) {
-  return (
-    <article
-      className={[
-        "soft-card-shadow min-w-[260px] rounded-lg border border-border-soft bg-white p-5 dark:bg-neutral-950 lg:min-w-0",
-        className ?? "",
-      ].join(" ")}
-    >
-      <p className="-mt-3 text-7xl font-black leading-none text-brand-blue">
-        &ldquo;
-      </p>
-      <p className="-mt-5 text-base font-medium leading-7 text-slate-900 dark:text-slate-100">
-        {quote}{" "}
-        <a href="#contact" className="font-semibold text-brand-blue">
-          Read More
-        </a>
-      </p>
-      <div className="mt-6 flex items-center gap-3">
-        <div className="grid size-11 place-items-center rounded-full bg-slate-200 text-sm font-bold text-slate-500 dark:bg-neutral-800 dark:text-neutral-200">
-          {author
-            .split(" ")
-            .slice(0, 2)
-            .map((part) => part[0])
-            .join("")}
-        </div>
-        <p className="text-sm font-semibold text-slate-900 dark:text-white">
-          {author}
-        </p>
-      </div>
-    </article>
   );
 }
