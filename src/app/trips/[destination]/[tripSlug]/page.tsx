@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { TripDetail } from "@/components/trips/TripDetail";
+import { getTripItineraryDTO } from "@/server/itinerary/dal";
 import {
   getPublicTripDestination,
   getPublicTripPackage,
@@ -32,12 +33,21 @@ export default async function TripPackagePage({
   params: Promise<{ destination: string; tripSlug: string }>;
 }) {
   const { destination, tripSlug } = await params;
-  const tripDestination = await getPublicTripDestination(destination);
-  const pkg = await getPublicTripPackage(destination, tripSlug);
+  const [tripDestination, pkg, itinerary] = await Promise.all([
+    getPublicTripDestination(destination),
+    getPublicTripPackage(destination, tripSlug),
+    getTripItineraryDTO(destination, tripSlug),
+  ]);
 
   if (!tripDestination || !pkg) {
     notFound();
   }
 
-  return <TripDetail destination={tripDestination} pkg={pkg} />;
+  return (
+    <TripDetail
+      destination={tripDestination}
+      pkg={pkg}
+      itinerary={itinerary}
+    />
+  );
 }

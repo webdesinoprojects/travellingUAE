@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import type { TripDestination, TripPackage } from "@/types/travel";
@@ -28,33 +29,68 @@ import type { TripDestination, TripPackage } from "@/types/travel";
 type SortKey = "recommended" | "cheapest" | "duration";
 type FlightFilter = "with" | "without" | null;
 
+export type TripListInitialFilters = {
+  q?: string;
+  city?: string;
+  minDuration?: number;
+  maxDuration?: number;
+  flights?: FlightFilter;
+  stars?: string[];
+  categories?: string[];
+  sort?: SortKey;
+};
+
 type TripListProps = {
   destination: TripDestination;
+  filterSource?: TripDestination;
   destinations: TripDestination[];
   displayDate: string;
-  initialLocation?: string;
+  initialFilters?: TripListInitialFilters;
 };
 
 export function TripList({
   destination,
+  filterSource,
   destinations,
   displayDate,
-  initialLocation,
+  initialFilters,
 }: TripListProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const filterDestination = filterSource ?? destination;
   const cityOptions = useMemo(
-    () => Array.from(new Set(destination.packages.map((pkg) => pkg.city))),
-    [destination.packages],
+    () => Array.from(new Set(filterDestination.packages.map((pkg) => pkg.city))),
+    [filterDestination.packages],
   );
-  const [keyword, setKeyword] = useState("");
-  const [sort, setSort] = useState<SortKey>("recommended");
-  const [selectedCity, setSelectedCity] = useState(initialLocation ?? "all");
-  const [flightFilter, setFlightFilter] = useState<FlightFilter>(null);
-  const [selectedStar, setSelectedStar] = useState<string | null>(null);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const initialCity =
+    initialFilters?.city && cityOptions.includes(initialFilters.city)
+      ? initialFilters.city
+      : "all";
+  const [keyword, setKeyword] = useState(initialFilters?.q ?? "");
+  const [sort, setSort] = useState<SortKey>(
+    initialFilters?.sort ?? "recommended",
+  );
+  const [selectedCity, setSelectedCity] = useState(initialCity);
+  const [flightFilter, setFlightFilter] = useState<FlightFilter>(
+    initialFilters?.flights ?? null,
+  );
+  const [selectedStar, setSelectedStar] = useState<string | null>(
+    initialFilters?.stars?.[0] ?? null,
+  );
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(
+    initialFilters?.categories ?? [],
+  );
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<TripPackage | null>(null);
 
   const activeCity = cityOptions.includes(selectedCity) ? selectedCity : "all";
+  const cityFilterUniverse = useMemo(
+    () =>
+      activeCity === "all"
+        ? filterDestination.packages
+        : filterDestination.packages.filter((pkg) => pkg.city === activeCity),
+    [activeCity, filterDestination.packages],
+  );
   const cityPackages = useMemo(
     () =>
       activeCity === "all"
@@ -63,32 +99,38 @@ export function TripList({
     [activeCity, destination.packages],
   );
   const durationBounds = useMemo(
-    () => getDurationBounds(cityPackages),
-    [cityPackages],
+    () => getDurationBounds(cityFilterUniverse),
+    [cityFilterUniverse],
   );
   const allDurationBounds = useMemo(
-    () => getDurationBounds(destination.packages),
-    [destination.packages],
+    () => getDurationBounds(filterDestination.packages),
+    [filterDestination.packages],
   );
-  const [durationMin, setDurationMin] = useState(durationBounds.min);
-  const [durationMax, setDurationMax] = useState(durationBounds.max);
+  const [durationMin, setDurationMin] = useState(
+    initialFilters?.minDuration ?? durationBounds.min,
+  );
+  const [durationMax, setDurationMax] = useState(
+    initialFilters?.maxDuration ?? durationBounds.max,
+  );
   const effectiveDurationMin = Math.max(durationMin, durationBounds.min);
   const effectiveDurationMax = Math.min(durationMax, durationBounds.max);
-  const [draftDurationMin, setDraftDurationMin] = useState(durationBounds.min);
-  const [draftDurationMax, setDraftDurationMax] = useState(durationBounds.max);
-  const [draftFlightFilter, setDraftFlightFilter] = useState<FlightFilter>(null);
-  const [draftSelectedStar, setDraftSelectedStar] = useState<string | null>(null);
+  const [draftDurationMin, setDraftDurationMin] = useState(effectiveDurationMin);
+  const [draftDurationMax, setDraftDurationMax] = useState(effectiveDurationMax);
+  const [draftFlightFilter, setDraftFlightFilter] =
+    useState<FlightFilter>(flightFilter);
+  const [draftSelectedStar, setDraftSelectedStar] =
+    useState<string | null>(selectedStar);
   const [draftSelectedCategories, setDraftSelectedCategories] = useState<string[]>(
-    [],
+    selectedCategories,
   );
 
   const categoryCounts = useMemo(
-    () => getCategoryCounts(destination, cityPackages),
-    [destination, cityPackages],
+    () => getCategoryCounts(filterDestination, cityFilterUniverse),
+    [cityFilterUniverse, filterDestination],
   );
   const starCounts = useMemo(
-    () => getStarCounts(destination, cityPackages),
-    [destination, cityPackages],
+    () => getStarCounts(filterDestination, cityFilterUniverse),
+    [cityFilterUniverse, filterDestination],
   );
 
   const filteredPackages = useMemo(() => {
@@ -160,6 +202,80 @@ export function TripList({
     );
   }
 
+  function writeFiltersToUrl(next: {
+    keyword?: string;
+    city?: string;
+    sort?: SortKey;
+    minDuration?: number;
+    maxDuration?: number;
+    flights?: FlightFilter;
+    star?: string | null;
+    categories?: string[];
+  }) {
+    const params = new URLSearchParams();
+    const nextKeyword = next.keyword ?? keyword;
+    const nextCity = next.city ?? activeCity;
+    const nextSort = next.sort ?? sort;
+    const nextMin = next.minDuration ?? effectiveDurationMin;
+    const nextMax = next.maxDuration ?? effectiveDurationMax;
+    const nextFlights = next.flights ?? flightFilter;
+    const nextStar = next.star === undefined ? selectedStar : next.star;
+    const nextCategories = next.categories ?? selectedCategories;
+
+    if (nextKeyword.trim()) {
+      params.set("q", nextKeyword.trim());
+    }
+
+    if (nextCity !== "all") {
+      params.set("city", nextCity);
+    }
+
+    if (nextSort !== "recommended") {
+      params.set("sort", nextSort);
+    }
+
+    if (nextMin !== allDurationBounds.min) {
+      params.set("minDuration", String(nextMin));
+    }
+
+    if (nextMax !== allDurationBounds.max) {
+      params.set("maxDuration", String(nextMax));
+    }
+
+    if (nextFlights) {
+      params.set("flights", nextFlights);
+    }
+
+    if (nextStar) {
+      params.set("stars", nextStar);
+    }
+
+    nextCategories.forEach((category) => {
+      params.append("categories", category);
+    });
+
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, {
+      scroll: false,
+    });
+  }
+
+  function updateKeyword(value: string) {
+    setKeyword(value);
+    writeFiltersToUrl({ keyword: value });
+  }
+
+  function updateCity(value: string) {
+    const nextCity = cityOptions.includes(value) ? value : "all";
+    setSelectedCity(nextCity);
+    writeFiltersToUrl({ city: nextCity });
+  }
+
+  function updateSort(value: SortKey) {
+    setSort(value);
+    writeFiltersToUrl({ sort: value });
+  }
+
   function openFilterDrawer() {
     setDraftDurationMin(effectiveDurationMin);
     setDraftDurationMax(effectiveDurationMax);
@@ -185,6 +301,13 @@ export function TripList({
     setSelectedStar(draftSelectedStar);
     setSelectedCategories(draftSelectedCategories);
     setIsFilterDrawerOpen(false);
+    writeFiltersToUrl({
+      minDuration: nextMin,
+      maxDuration: nextMax,
+      flights: draftFlightFilter,
+      star: draftSelectedStar,
+      categories: draftSelectedCategories,
+    });
   }
 
   function resetDraftFilters() {
@@ -204,6 +327,7 @@ export function TripList({
     setDurationMin(allDurationBounds.min);
     setDurationMax(allDurationBounds.max);
     resetDraftFilters();
+    router.replace(pathname, { scroll: false });
   }
 
   return (
@@ -213,10 +337,10 @@ export function TripList({
           destination={destination}
           destinations={destinations}
           keyword={keyword}
-          onKeywordChange={setKeyword}
+          onKeywordChange={updateKeyword}
           selectedCity={activeCity}
           cityOptions={cityOptions}
-          onCityChange={setSelectedCity}
+          onCityChange={updateCity}
           displayDate={displayDate}
         />
 
@@ -239,7 +363,7 @@ export function TripList({
                 <button
                   type="button"
                   onClick={openFilterDrawer}
-                  className="inline-flex h-11 items-center gap-2 rounded-lg border border-border-soft bg-surface px-4 text-sm font-extrabold text-brand-navy transition hover:border-brand-blue dark:bg-neutral-950 dark:text-white"
+                  className="inline-flex h-11 items-center gap-2 rounded-lg border border-border-soft bg-surface px-4 text-sm font-extrabold text-brand-navy transition hover:border-brand-blue dark:bg-neutral-950 dark:text-white lg:hidden"
                 >
                   <Filter aria-hidden="true" className="size-4" />
                   Filters
@@ -263,7 +387,7 @@ export function TripList({
                 <span className="sr-only">Sort trips</span>
                 <select
                   value={sort}
-                  onChange={(event) => setSort(event.target.value as SortKey)}
+                  onChange={(event) => updateSort(event.target.value as SortKey)}
                   className="h-11 w-full appearance-none rounded-lg border border-border-soft bg-surface px-4 text-sm font-bold text-brand-navy outline-none transition focus:border-brand-blue dark:bg-neutral-950 dark:text-white"
                 >
                   <option value="recommended">Recommended</option>
@@ -274,20 +398,58 @@ export function TripList({
             </div>
           </div>
 
-          {filteredPackages.length > 0 ? (
-            <div className="mt-5 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {filteredPackages.map((pkg, index) => (
-                <TripResultCard
-                  key={pkg.slug}
-                  pkg={pkg}
-                  priority={index < 3}
-                  onOpen={() => setSelectedTrip(pkg)}
+          <div className="mt-5 grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
+            <aside className="hidden lg:block">
+              <div className="sticky top-28">
+                <FilterPanel
+                  durationBounds={durationBounds}
+                  durationMin={draftDurationMin}
+                  durationMax={draftDurationMax}
+                  onDurationMinChange={(value) =>
+                    setDraftDurationMin(Math.min(value, draftDurationMax))
+                  }
+                  onDurationMaxChange={(value) =>
+                    setDraftDurationMax(Math.max(value, draftDurationMin))
+                  }
+                  flightFilter={draftFlightFilter}
+                  onFlightChange={(value) =>
+                    setDraftFlightFilter((current) =>
+                      current === value ? null : value,
+                    )
+                  }
+                  starCounts={starCounts}
+                  selectedStar={draftSelectedStar}
+                  onStarChange={(value) =>
+                    setDraftSelectedStar((current) =>
+                      current === value ? null : value,
+                    )
+                  }
+                  categoryCounts={categoryCounts}
+                  selectedCategories={draftSelectedCategories}
+                  onCategoryChange={toggleDraftCategory}
+                  onReset={resetDraftFilters}
+                  onApply={applyFilters}
                 />
-              ))}
+              </div>
+            </aside>
+
+            <div className="min-w-0">
+              {filteredPackages.length > 0 ? (
+                <div className="grid gap-5 md:grid-cols-2">
+                  {filteredPackages.map((pkg, index) => (
+                    <TripResultCard
+                      key={pkg.slug}
+                      pkg={pkg}
+                      priority={index < 3}
+                      onOpen={() => setSelectedTrip(pkg)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyResults onClear={clearFilters} />
+              )}
             </div>
-          ) : (
-            <EmptyResults onClear={clearFilters} />
-          )}
+          </div>
         </section>
       </main>
 
@@ -476,7 +638,7 @@ function FilterDrawer({
         onClick={onClose}
         className="absolute inset-0 bg-black/52 backdrop-blur-[2px]"
       />
-      <div className="absolute inset-x-0 bottom-0 max-h-[88vh] overflow-y-auto rounded-t-2xl border border-border-soft bg-surface p-4 shadow-[0_-20px_56px_rgb(0_0_0/0.28)] dark:bg-black sm:p-5">
+      <aside className="absolute left-0 top-0 h-full w-[min(380px,calc(100vw-28px))] overflow-y-auto rounded-r-2xl border-r border-border-soft bg-surface p-4 shadow-[20px_0_56px_rgb(0_0_0/0.28)] dark:bg-black sm:p-5">
         <div className="flex items-center justify-between gap-4">
           <h2 className="inline-flex items-center gap-2 text-sm font-extrabold uppercase tracking-[0.18em] text-brand-navy dark:text-white">
             <Filter aria-hidden="true" className="size-4" />
@@ -491,100 +653,145 @@ function FilterDrawer({
           </button>
         </div>
 
-        <FilterSection title="Duration">
-          <div className="grid grid-cols-2 gap-2">
-            <NumberField
-              label="Min"
-              value={durationMin}
-              min={durationBounds.min}
-              max={durationMax}
-              onChange={onDurationMinChange}
-            />
-            <NumberField
-              label="Max"
-              value={durationMax}
-              min={durationMin}
-              max={durationBounds.max}
-              onChange={onDurationMaxChange}
-            />
-          </div>
-        </FilterSection>
+        <FilterPanel
+          durationBounds={durationBounds}
+          durationMin={durationMin}
+          durationMax={durationMax}
+          onDurationMinChange={onDurationMinChange}
+          onDurationMaxChange={onDurationMaxChange}
+          flightFilter={flightFilter}
+          onFlightChange={onFlightChange}
+          starCounts={starCounts}
+          selectedStar={selectedStar}
+          onStarChange={onStarChange}
+          categoryCounts={categoryCounts}
+          selectedCategories={selectedCategories}
+          onCategoryChange={onCategoryChange}
+          onReset={onReset}
+          onApply={onApply}
+        />
+      </aside>
+    </div>
+  );
+}
 
-        <FilterSection title="Flights">
-          <div className="grid grid-cols-2 gap-2">
-            <FilterOption
-              active={flightFilter === "with"}
-              onClick={() => onFlightChange("with")}
-            >
-              With
-            </FilterOption>
-            <FilterOption
-              active={flightFilter === "without"}
-              onClick={() => onFlightChange("without")}
-            >
-              Without
-            </FilterOption>
-          </div>
-        </FilterSection>
+function FilterPanel({
+  durationBounds,
+  durationMin,
+  durationMax,
+  onDurationMinChange,
+  onDurationMaxChange,
+  flightFilter,
+  onFlightChange,
+  starCounts,
+  selectedStar,
+  onStarChange,
+  categoryCounts,
+  selectedCategories,
+  onCategoryChange,
+  onReset,
+  onApply,
+}: Omit<Parameters<typeof FilterDrawer>[0], "open" | "onClose">) {
+  return (
+    <div className="modern-card mt-4 rounded-lg p-4 lg:mt-0">
+      <div className="hidden items-center gap-2 text-sm font-extrabold uppercase tracking-[0.18em] text-brand-navy dark:text-white lg:flex">
+        <Filter aria-hidden="true" className="size-4" />
+        Filters
+      </div>
 
-        <FilterSection title="Hotel class">
-          <div className="flex flex-wrap gap-2">
-            {starCounts.map((star) => (
-              <FilterOption
-                key={star.label}
-                active={selectedStar === star.label}
-                onClick={() => onStarChange(star.label)}
-              >
-                {star.label}
-                <Star aria-hidden="true" className="size-3 fill-current" />
-                <span className="opacity-60">({star.count})</span>
-              </FilterOption>
-            ))}
-          </div>
-        </FilterSection>
-
-        <FilterSection title="Travel style">
-          <div className="grid gap-2">
-            {categoryCounts.map((category) => (
-              <button
-                key={category.label}
-                type="button"
-                onClick={() => onCategoryChange(category.label)}
-                className={[
-                  "flex min-h-10 items-center justify-between gap-3 rounded-lg border px-3 text-left text-sm font-semibold transition",
-                  selectedCategories.includes(category.label)
-                    ? "border-brand-blue bg-brand-blue text-white dark:border-brand-sand dark:bg-brand-sand dark:text-brand-navy"
-                    : "border-border-soft bg-surface text-brand-navy hover:border-brand-blue dark:bg-neutral-950 dark:text-white",
-                ].join(" ")}
-              >
-                <span className="inline-flex items-center gap-2">
-                  {selectedCategories.includes(category.label) ? (
-                    <CheckCircle2 aria-hidden="true" className="size-4" />
-                  ) : null}
-                  {category.label}
-                </span>
-                <span className="opacity-70">{category.count}</span>
-              </button>
-            ))}
-          </div>
-        </FilterSection>
-
-        <div className="sticky bottom-0 mt-6 grid grid-cols-2 gap-2 border-t border-border-soft bg-surface pt-4 dark:bg-black">
-          <button
-            type="button"
-            onClick={onReset}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-border-soft text-sm font-bold text-brand-blue transition hover:border-brand-blue dark:text-brand-sand"
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            onClick={onApply}
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-brand-blue text-sm font-extrabold text-white transition hover:bg-brand-blue-strong dark:bg-brand-sand dark:text-brand-navy"
-          >
-            Apply
-          </button>
+      <FilterSection title="Duration">
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField
+            label="Min"
+            value={durationMin}
+            min={durationBounds.min}
+            max={durationMax}
+            onChange={onDurationMinChange}
+          />
+          <NumberField
+            label="Max"
+            value={durationMax}
+            min={durationMin}
+            max={durationBounds.max}
+            onChange={onDurationMaxChange}
+          />
         </div>
+      </FilterSection>
+
+      <FilterSection title="Flights">
+        <div className="grid grid-cols-2 gap-2">
+          <FilterOption
+            active={flightFilter === "with"}
+            onClick={() => onFlightChange("with")}
+          >
+            With
+          </FilterOption>
+          <FilterOption
+            active={flightFilter === "without"}
+            onClick={() => onFlightChange("without")}
+          >
+            Without
+          </FilterOption>
+        </div>
+      </FilterSection>
+
+      <FilterSection title="Hotel class">
+        <div className="flex flex-wrap gap-2">
+          {starCounts.map((star) => (
+            <FilterOption
+              key={star.label}
+              active={selectedStar === star.label}
+              onClick={() => onStarChange(star.label)}
+            >
+              {star.label}
+              <Star aria-hidden="true" className="size-3 fill-current" />
+              <span className="opacity-60">({star.count})</span>
+            </FilterOption>
+          ))}
+        </div>
+      </FilterSection>
+
+      <FilterSection title="Travel style">
+        <div className="grid gap-2">
+          {categoryCounts.map((category) => (
+            <button
+              key={category.label}
+              type="button"
+              onClick={() => onCategoryChange(category.label)}
+              className={[
+                "flex min-h-10 items-center justify-between gap-3 rounded-lg border px-3 text-left text-sm font-semibold transition",
+                selectedCategories.includes(category.label)
+                  ? "border-brand-blue bg-brand-blue text-white dark:border-brand-sand dark:bg-brand-sand dark:text-brand-navy"
+                  : "border-border-soft bg-surface text-brand-navy hover:border-brand-blue dark:bg-neutral-950 dark:text-white",
+              ].join(" ")}
+            >
+              <span className="inline-flex items-center gap-2">
+                {selectedCategories.includes(category.label) ? (
+                  <CheckCircle2 aria-hidden="true" className="size-4" />
+                ) : null}
+                {category.label}
+              </span>
+              <span className="opacity-70">{category.count}</span>
+            </button>
+          ))}
+        </div>
+      </FilterSection>
+
+      <div className="sticky bottom-0 mt-6 grid grid-cols-2 gap-2 border-t border-border-soft bg-surface pt-4 dark:bg-black lg:static">
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex h-11 items-center justify-center rounded-lg border border-border-soft text-sm font-bold text-brand-blue transition hover:border-brand-blue dark:text-brand-sand"
+        >
+          Reset
+        </button>
+        <button
+          type="button"
+          onClick={onApply}
+          className="inline-flex h-11 items-center justify-center rounded-lg bg-brand-blue text-sm font-extrabold text-white transition hover:bg-brand-blue-strong dark:bg-brand-sand dark:text-brand-navy"
+        >
+          Apply
+        </button>
       </div>
     </div>
   );

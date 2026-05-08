@@ -15,15 +15,18 @@ import Image from "next/image";
 import Link from "next/link";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { TripGallery } from "@/components/trips/TripGallery";
+import { TripItineraryPlanner } from "@/components/trips/TripItineraryPlanner";
+import type { TripItineraryDTO } from "@/types/itinerary";
 import type { TripDestination, TripGalleryImage, TripPackage } from "@/types/travel";
 
 type TripDetailProps = {
   destination: TripDestination;
   pkg: TripPackage;
+  itinerary?: TripItineraryDTO | null;
 };
 
-export function TripDetail({ destination, pkg }: TripDetailProps) {
-  const itinerary = buildItinerary(pkg);
+export function TripDetail({ destination, pkg, itinerary }: TripDetailProps) {
+  const fallbackItinerary = buildItinerary(pkg);
   const recommended = destination.packages
     .filter((item) => item.slug !== pkg.slug)
     .concat(destination.packages)
@@ -75,7 +78,16 @@ export function TripDetail({ destination, pkg }: TripDetailProps) {
             </section>
 
             <IncludedSection pkg={pkg} />
-            <ItinerarySection days={itinerary} images={pkg.gallery} />
+            {itinerary?.segments.length ? (
+              <TripItineraryPlanner
+                destinationSlug={destination.slug}
+                tripSlug={pkg.slug}
+                itinerary={itinerary}
+                basePrice={pkg.price}
+              />
+            ) : (
+              <ItinerarySection days={fallbackItinerary} images={pkg.gallery} />
+            )}
           </article>
 
           <BookingCard pkg={pkg} />
@@ -161,7 +173,7 @@ function ItinerarySection({
   images: TripGalleryImage[];
 }) {
   return (
-    <section className="mt-12 max-w-[820px]">
+    <section id="trip-builder" className="mt-12 max-w-[820px] scroll-mt-28">
       <h2 className="text-3xl font-extrabold tracking-tight text-brand-navy dark:text-white">
         Itinerary
       </h2>
@@ -278,10 +290,10 @@ function BookingCard({ pkg }: { pkg: TripPackage }) {
           </div>
 
           <a
-            href="#contact"
+            href="#trip-builder"
             className="mt-5 flex h-12 items-center justify-center rounded-lg bg-brand-navy text-sm font-extrabold text-white transition hover:bg-brand-blue dark:bg-brand-sand dark:text-brand-navy"
           >
-            Book Now
+            Customize Trip
           </a>
         </div>
       </div>

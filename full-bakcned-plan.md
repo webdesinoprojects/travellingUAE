@@ -41,12 +41,12 @@ For Phase 1 carry-over, see `dev-left/phase-1/left.md`.
 | Phase 1 | Public trip DAL | Partial | `/trips`, `/trips/[destination]`, `/trips/[destination]/[tripSlug]` read through DAL with fallback safety | Public trip APIs tested |
 | Phase 1 | Public booking/contact/newsletter routes | Partial | Existing forms can call these routes; email send/rate limit still pending | Booking route tested |
 | Phase 1 | Admin dashboard read APIs | Partial | Admin UI reads DAL-backed preview/fallback data | Build passed; admin preview token still temporary |
-| Phase 2 | Itinerary/options schema | Done | Booking UI wiring still pending | Remote migration applied |
-| Phase 2 | Itinerary timeline API | Done | Pending frontend booking-page timeline replacement | Smoke tested |
-| Phase 2 | Flight/hotel/transfer/activity option APIs | Done for seeded/manual options | Pending modal/sidebar option picker UI wiring | Smoke tested flight options |
-| Phase 2 | Selection session API | Done | Pending frontend selection state wiring | Smoke tested with HTTP-only cookie |
-| Phase 2 | Booking linked to selected option session | Done | Existing booking API supports linked option session; final booking form UI still pending | Smoke tested and DB-count verified |
-| Phase 2 | Trip list filters | Partial | API supports query filters; current UI still needs sidebar/menu behavior cleanup and URL round-trip | Public destination filter API tested |
+| Phase 2 | Itinerary/options schema | Done | Trip detail can render backend itinerary segments | Remote migration applied |
+| Phase 2 | Itinerary timeline API | Done | Initial trip detail page wiring done via `TripItineraryPlanner` | Smoke tested; production build passed |
+| Phase 2 | Flight/hotel/transfer/activity option APIs | Done for seeded/manual options | Initial option picker drawer wired on trip detail page | Smoke tested all four option types |
+| Phase 2 | Selection session API | Done | Initial selection update wiring done with HTTP-only session cookie | Smoke tested with HTTP-only cookie |
+| Phase 2 | Booking linked to selected option session | Done | Existing booking API supports linked option session; final booking form UI still pending | Smoke tested |
+| Phase 2 | Trip list filters | Partial | Desktop sidebar, mobile left slide-in menu, URL round-trip, and shared server filter helper are wired; DB-level pagination/filter query is still pending for large inventory | Public destination filter API tested |
 | Phase 2 | Remove static trip dependency | Partial | DAL falls back to `src/data/trips.ts` when DB is unavailable; final production mode should rely on Supabase seed/admin data | Pending final cleanup |
 | Phase 3 | Admin CRUD APIs | Pending | Admin forms still demo/read-focused | Not started |
 | Phase 3 | Audit log writes for admin mutations | Pending | Not UI-specific | Not started |

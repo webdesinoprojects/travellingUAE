@@ -6,7 +6,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "destinations=1, total=1",
-        "ms":  958
+        "ms":  640
     },
     {
         "name":  "Destination packages filter",
@@ -15,7 +15,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "packages=1, destination=armenia",
-        "ms":  433
+        "ms":  1321
     },
     {
         "name":  "Trip detail",
@@ -24,7 +24,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "package=yerevan-flexible-city-break, recommended=0",
-        "ms":  1200
+        "ms":  2059
     },
     {
         "name":  "Booking itinerary",
@@ -33,7 +33,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "segments=7, trip=yerevan-flexible-city-break",
-        "ms":  913
+        "ms":  1739
     },
     {
         "name":  "Flight options",
@@ -42,7 +42,34 @@
         "status":  200,
         "passed":  true,
         "detail":  "options=4, segment=00000000-0000-4000-8000-000000000501",
-        "ms":  1619
+        "ms":  1703
+    },
+    {
+        "name":  "Hotel options",
+        "method":  "GET",
+        "url":  "/api/public/trips/armenia/yerevan-flexible-city-break/options?segmentId=00000000-0000-4000-8000-000000000503\u0026type=hotel\u0026sort=price",
+        "status":  200,
+        "passed":  true,
+        "detail":  "options=4, segment=00000000-0000-4000-8000-000000000503",
+        "ms":  862
+    },
+    {
+        "name":  "Transfer options",
+        "method":  "GET",
+        "url":  "/api/public/trips/armenia/yerevan-flexible-city-break/options?segmentId=00000000-0000-4000-8000-000000000502\u0026type=transfer\u0026sort=price",
+        "status":  200,
+        "passed":  true,
+        "detail":  "options=2, segment=00000000-0000-4000-8000-000000000502",
+        "ms":  804
+    },
+    {
+        "name":  "Activity options",
+        "method":  "GET",
+        "url":  "/api/public/trips/armenia/yerevan-flexible-city-break/options?segmentId=00000000-0000-4000-8000-000000000504\u0026type=activity\u0026sort=price",
+        "status":  200,
+        "passed":  true,
+        "detail":  "options=2, segment=00000000-0000-4000-8000-000000000504",
+        "ms":  806
     },
     {
         "name":  "Select flight option",
@@ -51,7 +78,7 @@
         "status":  201,
         "passed":  true,
         "detail":  "selected=00000000-0000-4000-8000-000000000601, totalDelta=+ SAR0",
-        "ms":  2462
+        "ms":  2557
     },
     {
         "name":  "Create booking linked to option session",
@@ -60,7 +87,7 @@
         "status":  201,
         "passed":  true,
         "detail":  "booking accepted",
-        "ms":  873
+        "ms":  861
     },
     {
         "name":  "Admin dashboard preview",

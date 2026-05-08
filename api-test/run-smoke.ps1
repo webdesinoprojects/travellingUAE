@@ -180,6 +180,28 @@ if ($flightSegment) {
   Add-Result -Name "Flight options" -Method "GET" -Url "/api/public/trips/$destination/$trip/options" -Status 0 -Passed $false -Detail "No flight segment found in itinerary response" -Ms 0
 }
 
+foreach ($optionType in @("hotel", "transfer", "activity")) {
+  $segment = $null
+
+  if ($itinerary -and $itinerary.json.data.segments.Count -gt 0) {
+    $segment = $itinerary.json.data.segments | Where-Object { $_.type -eq $optionType } | Select-Object -First 1
+  }
+
+  $label = "$($optionType.Substring(0, 1).ToUpper())$($optionType.Substring(1)) options"
+
+  if ($segment) {
+    Invoke-JsonStep `
+      -Name $label `
+      -Path "/api/public/trips/$destination/$trip/options?segmentId=$($segment.id)&type=${optionType}&sort=price" `
+      -Assert {
+        param($json)
+        Assert-Ok $json "options=$($json.data.options.Count), segment=$($json.data.segment.id)"
+      } | Out-Null
+  } else {
+    Add-Result -Name $label -Method "GET" -Url "/api/public/trips/$destination/$trip/options" -Status 0 -Passed $false -Detail "No $optionType segment found in itinerary response" -Ms 0
+  }
+}
+
 if (!$SkipMutations -and $flightSegment -and $firstOption) {
   Invoke-JsonStep `
     -Name "Select flight option" `
