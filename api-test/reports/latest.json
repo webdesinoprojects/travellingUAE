@@ -1,0 +1,83 @@
+﻿[
+    {
+        "name":  "Public destinations list",
+        "method":  "GET",
+        "url":  "/api/public/trips",
+        "status":  200,
+        "passed":  true,
+        "detail":  "destinations=1, total=1",
+        "ms":  958
+    },
+    {
+        "name":  "Destination packages filter",
+        "method":  "GET",
+        "url":  "/api/public/trips/armenia?sort=cheapest\u0026minDuration=1\u0026maxDuration=10\u0026flights=with",
+        "status":  200,
+        "passed":  true,
+        "detail":  "packages=1, destination=armenia",
+        "ms":  433
+    },
+    {
+        "name":  "Trip detail",
+        "method":  "GET",
+        "url":  "/api/public/trips/armenia/yerevan-flexible-city-break",
+        "status":  200,
+        "passed":  true,
+        "detail":  "package=yerevan-flexible-city-break, recommended=0",
+        "ms":  1200
+    },
+    {
+        "name":  "Booking itinerary",
+        "method":  "GET",
+        "url":  "/api/public/trips/armenia/yerevan-flexible-city-break/itinerary",
+        "status":  200,
+        "passed":  true,
+        "detail":  "segments=7, trip=yerevan-flexible-city-break",
+        "ms":  913
+    },
+    {
+        "name":  "Flight options",
+        "method":  "GET",
+        "url":  "/api/public/trips/armenia/yerevan-flexible-city-break/options?segmentId=00000000-0000-4000-8000-000000000501\u0026type=flight\u0026sort=price",
+        "status":  200,
+        "passed":  true,
+        "detail":  "options=4, segment=00000000-0000-4000-8000-000000000501",
+        "ms":  1619
+    },
+    {
+        "name":  "Select flight option",
+        "method":  "POST",
+        "url":  "/api/public/trips/armenia/yerevan-flexible-city-break/selection",
+        "status":  201,
+        "passed":  true,
+        "detail":  "selected=00000000-0000-4000-8000-000000000601, totalDelta=+ SAR0",
+        "ms":  2462
+    },
+    {
+        "name":  "Create booking linked to option session",
+        "method":  "POST",
+        "url":  "/api/bookings",
+        "status":  201,
+        "passed":  true,
+        "detail":  "booking accepted",
+        "ms":  873
+    },
+    {
+        "name":  "Admin dashboard preview",
+        "method":  "GET",
+        "url":  "/api/admin/dashboard",
+        "status":  0,
+        "passed":  true,
+        "detail":  "skipped because ADMIN_PREVIEW_TOKEN is not set",
+        "ms":  0
+    },
+    {
+        "name":  "Admin trips resource preview",
+        "method":  "GET",
+        "url":  "/api/admin/resources/trips",
+        "status":  0,
+        "passed":  true,
+        "detail":  "skipped because ADMIN_PREVIEW_TOKEN is not set",
+        "ms":  0
+    }
+]

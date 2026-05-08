@@ -69,6 +69,14 @@ export type AdminChartPoint = {
   revenue: number;
 };
 
+export type AdminAnalyticsPeriod = "week" | "month" | "year";
+
+export type AdminPieSegment = {
+  label: string;
+  value: number;
+  color: string;
+};
+
 export type AdminQueueItem = {
   title: string;
   owner: string;
@@ -100,4 +108,31 @@ export type AdminResourceConfig = {
   rows: AdminResourceRow[];
   queueTitle: string;
   queue: AdminQueueItem[];
+};
+
+export type AdminQuickAction = {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+};
+
+export type AdminFinanceItem = {
+  label: string;
+  value: string;
+  icon: LucideIcon;
+};
+
+export type AdminDashboardDTO = {
+  metrics: AdminMetric[];
+  packageCards: AdminPackageCard[];
+  bookings: AdminBooking[];
+  destinationStats: AdminDestinationStat[];
+  activityFeed: AdminActivity[];
+  calendarDays: AdminCalendarDay[];
+  contentQueue: AdminQueueItem[];
+  quickActions: AdminQuickAction[];
+  finance: AdminFinanceItem[];
+  analytics: Record<AdminAnalyticsPeriod, AdminChartPoint[]>;
+  pieSegments: AdminPieSegment[];
+  activePipelinePercent: number;
 };

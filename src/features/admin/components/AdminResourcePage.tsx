@@ -2,15 +2,15 @@ import Link from "next/link";
 import { ArrowRight, Download, Plus, Search } from "lucide-react";
 
 import { MetricCard, StatusBadge } from "@/features/admin/components/AdminDashboard";
-import { resourceConfigs } from "@/features/admin/mock/admin-data";
 import type { AdminResourceConfig, AdminResourceRow } from "@/features/admin/types";
+import { getAdminResourceDTO, type AdminResourceKey } from "@/server/admin/dal";
 
 type AdminResourcePageProps = {
-  resource: keyof typeof resourceConfigs;
+  resource: AdminResourceKey;
 };
 
-export function AdminResourcePage({ resource }: AdminResourcePageProps) {
-  const config = resourceConfigs[resource];
+export async function AdminResourcePage({ resource }: AdminResourcePageProps) {
+  const config = await getAdminResourceDTO(resource);
 
   return (
     <div className="grid gap-5">

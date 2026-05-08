@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { TripList } from "@/components/trips/TripList";
-import { getTripDestinations } from "@/data/trips";
 import { formatTripDisplayDate } from "@/lib/date";
+import { getPublicTripDestinations } from "@/server/public/dal";
 
 export const metadata: Metadata = {
   title: "Trips | Fly Time",
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 
 export default async function TripsPage() {
   await connection();
-  const destinations = await getTripDestinations();
+  const destinations = await getPublicTripDestinations();
   const destination = destinations[0];
 
   if (!destination) {

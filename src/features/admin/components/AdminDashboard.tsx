@@ -11,52 +11,63 @@ import {
 } from "lucide-react";
 
 import { AdminAnalyticsPanel } from "@/features/admin/components/AdminAnalyticsPanel";
-import {
-  activityFeed,
-  adminBookings,
-  adminMetrics,
-  adminPackageCards,
-  calendarDays,
-  contentQueue,
-  dashboardFinance,
-  dashboardQuickActions,
-  destinationStats,
-} from "@/features/admin/mock/admin-data";
 import type {
+  AdminActivity,
   AdminBooking,
+  AdminCalendarDay,
+  AdminDestinationStat,
+  AdminFinanceItem,
   AdminMetric,
   AdminPackageCard,
+  AdminQueueItem,
+  AdminQuickAction,
   AdminStatus,
 } from "@/features/admin/types";
+import { getAdminDashboardDTO } from "@/server/admin/dal";
 
-export function AdminDashboard() {
+export async function AdminDashboard() {
+  const dashboard = await getAdminDashboardDTO();
+
   return (
     <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
       <section className="grid gap-5">
-        <DashboardHero />
-        <MetricGrid metrics={adminMetrics} />
+        <DashboardHero
+          finance={dashboard.finance}
+          quickActions={dashboard.quickActions}
+        />
+        <MetricGrid metrics={dashboard.metrics} />
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <TravelPackages />
+          <TravelPackages packages={dashboard.packageCards} />
           <TripHealthCard />
         </div>
 
-        <AdminAnalyticsPanel />
+        <AdminAnalyticsPanel
+          analyticsData={dashboard.analytics}
+          pieSegments={dashboard.pieSegments}
+          activePipelinePercent={dashboard.activePipelinePercent}
+        />
 
-        <BookingTable />
+        <BookingTable bookings={dashboard.bookings} />
       </section>
 
       <aside className="grid content-start gap-5">
-        <CalendarCard />
-        <TopDestinations />
-        <ContentQueue />
-        <ActivityFeed />
+        <CalendarCard days={dashboard.calendarDays} />
+        <TopDestinations destinations={dashboard.destinationStats} />
+        <ContentQueue items={dashboard.contentQueue} />
+        <ActivityFeed activities={dashboard.activityFeed} />
       </aside>
     </div>
   );
 }
 
-function DashboardHero() {
+function DashboardHero({
+  finance,
+  quickActions,
+}: {
+  finance: AdminFinanceItem[];
+  quickActions: AdminQuickAction[];
+}) {
   return (
     <section className="overflow-hidden rounded-lg border border-[#d7c5ad] bg-brand-navy text-white shadow-[0_22px_70px_rgb(7_23_57/0.18)] dark:border-white/10">
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_420px] lg:p-5">
@@ -75,7 +86,7 @@ function DashboardHero() {
           </p>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            {dashboardFinance.map((item, index) => {
+            {finance.map((item, index) => {
               const Icon = item.icon;
               const accents = [
                 "bg-[#c2e8ff] text-brand-navy",
@@ -114,7 +125,7 @@ function DashboardHero() {
             <Plus aria-hidden="true" className="size-5 text-brand-sand" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {dashboardQuickActions.map((action, index) => {
+            {quickActions.map((action, index) => {
               const Icon = action.icon;
               const tileColors = [
                 "bg-[#c2e8ff] text-brand-navy",
@@ -189,7 +200,7 @@ export function MetricCard({ metric }: { metric: AdminMetric }) {
   );
 }
 
-function TravelPackages() {
+function TravelPackages({ packages }: { packages: AdminPackageCard[] }) {
   return (
     <AdminPanel
       title="Travel packages"
@@ -198,7 +209,7 @@ function TravelPackages() {
       className="min-w-0"
     >
       <div className="grid gap-4 md:grid-cols-3">
-        {adminPackageCards.map((pkg) => (
+        {packages.map((pkg) => (
           <PackageCard key={pkg.title} pkg={pkg} />
         ))}
       </div>
@@ -287,11 +298,11 @@ function TripHealthCard() {
   );
 }
 
-function ContentQueue() {
+function ContentQueue({ items }: { items: AdminQueueItem[] }) {
   return (
     <AdminPanel title="Content readiness" action="Resolve">
       <div className="grid gap-3">
-        {contentQueue.map((item) => (
+        {items.map((item) => (
           <div
             key={item.title}
             className="flex items-center gap-3 rounded-lg border border-[#d7c5ad] bg-[#fffaf2] p-3 dark:border-white/10 dark:bg-white/[0.06]"
@@ -313,7 +324,7 @@ function ContentQueue() {
   );
 }
 
-function BookingTable() {
+function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
   return (
     <AdminPanel
       title="Recent bookings"
@@ -334,7 +345,7 @@ function BookingTable() {
             </tr>
           </thead>
           <tbody>
-            {adminBookings.map((booking) => (
+            {bookings.map((booking) => (
               <BookingRow key={booking.id} booking={booking} />
             ))}
           </tbody>
@@ -367,7 +378,7 @@ function BookingRow({ booking }: { booking: AdminBooking }) {
   );
 }
 
-function CalendarCard() {
+function CalendarCard({ days }: { days: AdminCalendarDay[] }) {
   return (
     <AdminPanel title="May 2026">
       <div className="grid grid-cols-7 gap-2 text-center text-xs font-black uppercase text-brand-brown">
@@ -376,7 +387,7 @@ function CalendarCard() {
         ))}
       </div>
       <div className="mt-3 grid grid-cols-7 gap-2">
-        {calendarDays.map((day) => (
+        {days.map((day) => (
           <span
             key={day.label}
             className={[
@@ -405,11 +416,15 @@ function CalendarCard() {
   );
 }
 
-function TopDestinations() {
+function TopDestinations({
+  destinations,
+}: {
+  destinations: AdminDestinationStat[];
+}) {
   return (
     <AdminPanel title="Top destinations" action="Manage" href="/admin/destinations">
       <div className="grid gap-4">
-        {destinationStats.map((destination) => (
+        {destinations.map((destination) => (
           <div key={destination.name}>
             <div className="mb-2 flex items-center justify-between gap-3">
               <div>
@@ -433,11 +448,11 @@ function TopDestinations() {
   );
 }
 
-function ActivityFeed() {
+function ActivityFeed({ activities }: { activities: AdminActivity[] }) {
   return (
     <AdminPanel title="Recent activity">
       <div className="grid gap-4">
-        {activityFeed.map((activity) => (
+        {activities.map((activity) => (
           <div key={activity.title} className="flex gap-3">
             <div
               className={[

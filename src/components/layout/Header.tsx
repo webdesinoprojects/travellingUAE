@@ -34,7 +34,7 @@ export function Header() {
         <div className="flex items-center gap-3">
           <a
             href="#contact"
-            className="hidden min-h-10 items-center rounded-lg bg-brand-blue px-5 text-sm font-bold text-white shadow-[0_10px_24px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy sm:inline-flex dark:bg-brand-sand dark:text-brand-navy"
+            className="hidden min-h-10 items-center rounded-lg bg-brand-blue px-5 text-sm font-bold text-white shadow-[0_10px_24px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy sm:inline-flex dark:bg-brand-sand dark:text-white dark:hover:bg-brand-sand/90"
           >
             Enquire
           </a>

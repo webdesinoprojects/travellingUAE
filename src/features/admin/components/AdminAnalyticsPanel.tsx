@@ -4,49 +4,19 @@ import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import { ArrowUpRight, PieChart, TrendingUp } from "lucide-react";
 
-type Period = "week" | "month" | "year";
-
 type AnalyticsPoint = {
   label: string;
   bookings: number;
   revenue: number;
 };
 
-const analyticsData: Record<Period, AnalyticsPoint[]> = {
-  week: [
-    { label: "Mon", bookings: 18, revenue: 24 },
-    { label: "Tue", bookings: 24, revenue: 34 },
-    { label: "Wed", bookings: 21, revenue: 31 },
-    { label: "Thu", bookings: 32, revenue: 45 },
-    { label: "Fri", bookings: 29, revenue: 41 },
-    { label: "Sat", bookings: 38, revenue: 56 },
-    { label: "Sun", bookings: 34, revenue: 48 },
-  ],
-  month: [
-    { label: "W1", bookings: 84, revenue: 112 },
-    { label: "W2", bookings: 108, revenue: 148 },
-    { label: "W3", bookings: 96, revenue: 132 },
-    { label: "W4", bookings: 126, revenue: 176 },
-  ],
-  year: [
-    { label: "Jan", bookings: 340, revenue: 580 },
-    { label: "Feb", bookings: 420, revenue: 640 },
-    { label: "Mar", bookings: 580, revenue: 820 },
-    { label: "Apr", bookings: 460, revenue: 740 },
-    { label: "May", bookings: 720, revenue: 960 },
-    { label: "Jun", bookings: 640, revenue: 880 },
-    { label: "Jul", bookings: 860, revenue: 1100 },
-    { label: "Aug", bookings: 540, revenue: 760 },
-  ],
-};
+type Period = "week" | "month" | "year";
 
-const pieSegments = [
-  { label: "Confirmed", value: 62, color: "#071739" },
-  { label: "Contacted", value: 24, color: "#123f76" },
-  { label: "New", value: 10, color: "#c2e8ff" },
-  { label: "Cancelled", value: 4, color: "#e3c39d" },
-  { label: "Completed", value: 18, color: "#a68768" },
-];
+type PieSegment = {
+  label: string;
+  value: number;
+  color: string;
+};
 
 const RevenueBarChart = dynamic(
   () => import("@/features/admin/components/AdminRecharts").then((mod) => mod.RevenueBarChart),
@@ -72,7 +42,15 @@ const StatusPieChart = dynamic(
   },
 );
 
-export function AdminAnalyticsPanel() {
+export function AdminAnalyticsPanel({
+  analyticsData,
+  pieSegments,
+  activePipelinePercent,
+}: {
+  analyticsData: Record<Period, AnalyticsPoint[]>;
+  pieSegments: PieSegment[];
+  activePipelinePercent: number;
+}) {
   const [period, setPeriod] = useState<Period>("month");
   const data = analyticsData[period];
   const totals = useMemo(
@@ -153,7 +131,7 @@ export function AdminAnalyticsPanel() {
           <StatusPieChart data={pieSegments} />
           <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
             <div>
-              <p className="text-4xl font-black">86%</p>
+              <p className="text-4xl font-black">{activePipelinePercent}%</p>
               <p className="text-xs font-black uppercase text-brand-brown">
                 Active pipeline
               </p>

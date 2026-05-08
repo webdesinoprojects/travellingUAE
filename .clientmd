@@ -1,0 +1,47 @@
+# Fly Time Client Questions
+
+Keep this file for backend/client decisions that are blocked on business or provider details.
+
+## Admin Auth
+
+- Confirm admin login method:
+  - Supabase email/password
+  - Supabase magic link/OTP
+  - external provider such as Google Workspace
+- Confirm roles needed beyond `admin` and `editor`.
+- Confirm whether admin must support multi-branch/team access later.
+
+## Booking Form
+
+- Confirm exact fields for trip booking/enquiry.
+- Confirm whether payment is enquiry-only, pay-later, or online payment.
+- Confirm whether users receive automatic confirmation emails.
+
+## Flight API
+
+- Provider name and documentation URL.
+- Sandbox API keys and auth method.
+- Required search fields.
+- Rate limits.
+- Whether we only show quotes or also create bookings/tickets.
+
+## Hotel API
+
+- Provider name and documentation URL.
+- Sandbox API keys and auth method.
+- Required search fields.
+- Room/guest child-age rules.
+- Whether hotel booking is live booking or enquiry-only.
+
+## Transport API
+
+- Provider name and documentation URL if there is one.
+- Required enquiry fields.
+- Vehicle categories and pricing rules.
+
+## Media And Email
+
+- Choose Cloudinary or ImageKit as primary media provider.
+- Confirm Resend or another transactional email provider.
+- Confirm notification recipient email for admin enquiries.
+

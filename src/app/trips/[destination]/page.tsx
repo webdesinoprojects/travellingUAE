@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { TripList } from "@/components/trips/TripList";
-import { getTripDestination, getTripDestinations } from "@/data/trips";
 import { formatTripDisplayDate } from "@/lib/date";
+import {
+  getPublicTripDestination,
+  getPublicTripDestinations,
+} from "@/server/public/dal";
 
 export async function generateMetadata({
   params,
@@ -10,7 +13,7 @@ export async function generateMetadata({
   params: Promise<{ destination: string }>;
 }): Promise<Metadata> {
   const { destination } = await params;
-  const tripDestination = await getTripDestination(destination);
+  const tripDestination = await getPublicTripDestination(destination);
 
   if (!tripDestination) {
     return {
@@ -33,8 +36,8 @@ export default async function DestinationTripsPage({
 }) {
   const { destination } = await params;
   const { location } = await searchParams;
-  const tripDestination = await getTripDestination(destination);
-  const destinations = await getTripDestinations();
+  const tripDestination = await getPublicTripDestination(destination);
+  const destinations = await getPublicTripDestinations();
 
   if (!tripDestination) {
     notFound();

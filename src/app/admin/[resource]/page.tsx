@@ -1,12 +1,15 @@
 import { notFound } from "next/navigation";
 
 import { AdminResourcePage } from "@/features/admin/components/AdminResourcePage";
-import { resourceConfigs } from "@/features/admin/mock/admin-data";
+import {
+  getAdminResourceKeys,
+  isAdminResource,
+} from "@/server/admin/dal";
 
-type AdminResourceRoute = keyof typeof resourceConfigs;
+export const dynamic = "force-dynamic";
 
 export function generateStaticParams() {
-  return Object.keys(resourceConfigs).map((resource) => ({ resource }));
+  return getAdminResourceKeys().map((resource) => ({ resource }));
 }
 
 export default async function AdminResourceRoutePage({
@@ -21,8 +24,4 @@ export default async function AdminResourceRoutePage({
   }
 
   return <AdminResourcePage resource={resource} />;
-}
-
-function isAdminResource(resource: string): resource is AdminResourceRoute {
-  return resource in resourceConfigs;
 }
