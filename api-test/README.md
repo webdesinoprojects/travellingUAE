@@ -22,6 +22,13 @@ If Next uses another port, pass that URL:
 .\api-test\run-smoke.ps1 -BaseUrl http://localhost:3001
 ```
 
+For local admin CRUD smoke tests without saving a preview token in `.env`, pass a temporary token to the app process and to the script in the same terminal:
+
+```powershell
+$env:ADMIN_PREVIEW_TOKEN = "temporary-local-token"
+.\api-test\run-smoke.ps1 -BaseUrl http://localhost:3000 -AdminToken $env:ADMIN_PREVIEW_TOKEN
+```
+
 ## Output
 
 The script writes:
@@ -42,5 +49,7 @@ Current smoke coverage:
 - segment option endpoint
 - option selection mutation
 - booking mutation linked to option session
-- optional admin dashboard/resource APIs when `ADMIN_PREVIEW_TOKEN` is present
-
+- admin API anonymous rejection
+- optional admin dashboard/resource APIs when an admin token is present
+- optional admin CMS page create/update/archive smoke
+- optional itinerary segment and activity option create/update/archive smoke

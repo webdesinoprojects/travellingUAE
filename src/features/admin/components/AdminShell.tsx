@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Bell, LogOut, Menu, PanelLeftClose, Search, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useState } from "react";
@@ -9,6 +9,7 @@ import { useState } from "react";
 import { adminNavItems } from "@/features/admin/mock/admin-data";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type AdminShellProps = {
   children: React.ReactNode;
@@ -17,7 +18,19 @@ type AdminShellProps = {
 export function AdminShell({ children }: AdminShellProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const pathname = usePathname();
   const sidebarWidth = isCollapsed ? 88 : 292;
+
+  if (pathname === "/admin/login") {
+    return (
+      <div className="min-h-screen bg-[#f7efe4] text-brand-navy dark:bg-black dark:text-white">
+        <div className="fixed inset-0 -z-10 bg-[radial-gradient(circle_at_18%_0%,rgb(194_232_255/0.7),transparent_24rem),radial-gradient(circle_at_100%_14%,rgb(227_195_157/0.55),transparent_26rem)] dark:bg-[radial-gradient(circle_at_12%_0%,rgb(18_63_118/0.35),transparent_22rem)]" />
+        <main className="mx-auto grid min-h-screen w-full max-w-6xl place-items-center px-4 py-10">
+          {children}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f7efe4] text-brand-navy dark:bg-black dark:text-white">
@@ -129,6 +142,14 @@ function AdminSidebar({
   onToggleCollapse?: () => void;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await createSupabaseBrowserClient().auth.signOut().catch(() => null);
+    await fetch("/api/admin/session", { method: "DELETE" }).catch(() => null);
+    router.replace("/admin/login");
+    router.refresh();
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -226,6 +247,7 @@ function AdminSidebar({
       <div className="mt-6 border-t border-border-soft pt-4 dark:border-white/10">
         <button
           type="button"
+          onClick={handleSignOut}
           className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-extrabold text-brand-brown transition hover:bg-white hover:text-brand-navy dark:hover:bg-white/10 dark:hover:text-white"
           title={isCollapsed ? "Sign out" : undefined}
         >

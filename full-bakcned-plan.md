@@ -48,9 +48,12 @@ For Phase 1 carry-over, see `dev-left/phase-1/left.md`.
 | Phase 2 | Booking linked to selected option session | Done | Existing booking API supports linked option session; final booking form UI still pending | Smoke tested |
 | Phase 2 | Trip list filters | Partial | Desktop sidebar, mobile left slide-in menu, URL round-trip, and shared server filter helper are wired; DB-level pagination/filter query is still pending for large inventory | Public destination filter API tested |
 | Phase 2 | Remove static trip dependency | Partial | DAL falls back to `src/data/trips.ts` when DB is unavailable; final production mode should rely on Supabase seed/admin data | Pending final cleanup |
-| Phase 3 | Admin CRUD APIs | Pending | Admin forms still demo/read-focused | Not started |
-| Phase 3 | Audit log writes for admin mutations | Pending | Not UI-specific | Not started |
-| Phase 3 | Media manager | Pending | Admin media UI pending | Not started |
+| Phase 3 | Admin auth | Done | `/admin` pages require a verified Supabase admin/editor session cookie; admin login creates the cookie through a server route | `lint`, `tsc`; smoke covers anonymous API rejection |
+| Phase 3 | Admin CRUD APIs | Done | Admin resource pages include a protected live CRUD action panel | CRUD smoke tests added for CMS pages |
+| Phase 3 | Audit log writes for admin mutations | Done | Not UI-specific | Resource and itinerary mutations write safe audit entries |
+| Phase 3 | Itinerary segment/option CRUD APIs | Done | Trip admin APIs can create/update/archive segments and flight/hotel/transfer/activity options | Smoke tests added for activity segment + option lifecycle |
+| Phase 3 | Admin forms | Partial | Live CRUD panel is wired; full per-resource editors are tracked in `dev-left/phase-3/left.md` | Basic create/update/delete panel covered |
+| Phase 3 | Media manager | Partial | Media asset metadata CRUD is wired; Cloudinary/ImageKit upload/signing remains provider phase | Resource CRUD route supports media records |
 | Phase 4 | CMS pages, footer legal pages, dynamic nav | Pending | Footer/nav/home still need full backend wiring | Not started |
 | Phase 4 | EN/AR translations | Pending | Language toggle is not backend-backed yet | Not started |
 | Phase 5 | Provider integrations | Pending | Flight/hotel/transport screens need provider-backed option data | Waiting on provider docs/credentials |
@@ -83,15 +86,23 @@ src/
       contact/route.ts
       newsletter/route.ts
       admin/
+        session/route.ts
         dashboard/route.ts
         resources/[resource]/route.ts
+        resources/[resource]/[id]/route.ts
+        trips/[tripId]/segments/route.ts
+        trips/[tripId]/segments/[segmentId]/route.ts
+        trips/[tripId]/segments/[segmentId]/options/route.ts
+        trips/[tripId]/segments/[segmentId]/options/[optionId]/route.ts
         bookings/[id]/route.ts
         media/route.ts
   server/
     admin/
+      access.ts
       dal.ts
       dto.ts
       fallback.ts
+      itinerary-resources.ts
       resources.ts
     public/
       dal.ts
@@ -608,7 +619,35 @@ Response:
 - queue
 - allowed actions
 
-### Future CRUD Routes
+### Admin CRUD Routes
+
+Implemented generic resource routes:
+
+- `POST /api/admin/resources/[resource]`
+- `PATCH /api/admin/resources/[resource]/[id]`
+- `DELETE /api/admin/resources/[resource]/[id]`
+
+Implemented itinerary/option routes:
+
+- `POST /api/admin/trips/[tripId]/segments`
+- `PATCH /api/admin/trips/[tripId]/segments/[segmentId]`
+- `DELETE /api/admin/trips/[tripId]/segments/[segmentId]`
+- `POST /api/admin/trips/[tripId]/segments/[segmentId]/options`
+- `PATCH /api/admin/trips/[tripId]/segments/[segmentId]/options/[optionId]?type=flight|hotel|transfer|activity`
+- `DELETE /api/admin/trips/[tripId]/segments/[segmentId]/options/[optionId]?type=flight|hotel|transfer|activity`
+
+Every implemented mutation:
+
+- Validates the request body.
+- Re-checks admin/editor role.
+- Uses the service role only in server-only modules.
+- Writes an audit log row.
+- Returns safe DTOs and generic errors only.
+- Revalidates admin/public paths related to trips and CMS data.
+
+Remaining resource-specific editor screens are tracked under `dev-left/phase-3/left.md`.
+
+### Resource-Specific CRUD Routes Still Optional
 
 - `POST /api/admin/destinations`
 - `PATCH /api/admin/destinations/[id]`
@@ -627,7 +666,7 @@ Response:
 - `PATCH /api/admin/navigation/[id]`
 - `PATCH /api/admin/translations/[id]`
 
-Every mutation must:
+Any future resource-specific mutation must:
 
 - Validate request body.
 - Re-check admin/editor role.

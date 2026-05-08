@@ -24,6 +24,7 @@ import {
 export type AdminResourceKey = (typeof adminResourceKeys)[number];
 
 type DbTripCard = {
+  id: string;
   title: string;
   destination_name: string;
   price_amount: number | string;
@@ -36,6 +37,7 @@ type DbTripCard = {
 };
 
 type DbDestinationCard = {
+  id: string;
   name: string;
   country: string | null;
   package_count: number | string | null;
@@ -76,12 +78,12 @@ export const getAdminDashboardDTO = cache(async (): Promise<AdminDashboardDTO> =
       supabase
         .from("published_trip_cards")
         .select(
-          "title,destination_name,price_amount,currency,duration_label,duration_days,card_image_url,card_image_alt",
+          "id,title,destination_name,price_amount,currency,duration_label,duration_days,card_image_url,card_image_alt",
         )
         .limit(3),
       supabase
         .from("published_destination_cards")
-        .select("name,country,package_count")
+        .select("id,name,country,package_count")
         .limit(6),
     ]);
 
@@ -257,7 +259,7 @@ async function getDestinationsResource(
   const supabase = getSupabaseAdminClient();
   const result = await supabase
     .from("published_destination_cards")
-    .select("name,country,package_count")
+    .select("id,name,country,package_count")
     .order("name", { ascending: true });
 
   if (result.error) {
@@ -265,6 +267,7 @@ async function getDestinationsResource(
   }
 
   const rows = ((result.data ?? []) as DbDestinationCard[]).map((row) => ({
+    id: row.id,
     name: row.name,
     country: row.country ?? row.name,
     packages: Number(row.package_count ?? 0),
@@ -282,7 +285,7 @@ async function getTripsResource(
   const result = await supabase
     .from("published_trip_cards")
     .select(
-      "title,destination_name,price_amount,currency,duration_label,duration_days",
+      "id,title,destination_name,price_amount,currency,duration_label,duration_days",
     )
     .order("title", { ascending: true });
 
@@ -291,6 +294,7 @@ async function getTripsResource(
   }
 
   const rows = ((result.data ?? []) as DbTripCard[]).map((row) => ({
+    id: row.id,
     title: row.title,
     destination: row.destination_name,
     duration: row.duration_label ?? `${row.duration_days} days`,
@@ -307,7 +311,8 @@ async function getSimpleResourceRows(
   columns: string[],
 ): Promise<AdminResourceConfig> {
   const supabase = getSupabaseAdminClient();
-  const result = await supabase.from(table).select(columns.join(",")).limit(50);
+  const safeColumns = columns.includes("id") ? columns : ["id", ...columns];
+  const result = await supabase.from(table).select(safeColumns.join(",")).limit(50);
 
   if (result.error) {
     throw result.error;

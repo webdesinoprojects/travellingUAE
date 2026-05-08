@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AdminResourcePage } from "@/features/admin/components/AdminResourcePage";
+import { requireAdminPageAccess } from "@/server/admin/access";
 import {
   getAdminResourceKeys,
   isAdminResource,
@@ -22,6 +23,16 @@ export default async function AdminResourceRoutePage({
   if (!isAdminResource(resource)) {
     notFound();
   }
+
+  await requireAdminPageAccess(
+    resource === "bookings" ||
+      resource === "newsletter" ||
+      resource === "users" ||
+      resource === "settings" ||
+      resource === "audit-log"
+      ? "admin"
+      : "editor",
+  );
 
   return <AdminResourcePage resource={resource} />;
 }

@@ -6,7 +6,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "destinations=1, total=1",
-        "ms":  640
+        "ms":  1072
     },
     {
         "name":  "Destination packages filter",
@@ -15,7 +15,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "packages=1, destination=armenia",
-        "ms":  1321
+        "ms":  1407
     },
     {
         "name":  "Trip detail",
@@ -24,7 +24,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "package=yerevan-flexible-city-break, recommended=0",
-        "ms":  2059
+        "ms":  1959
     },
     {
         "name":  "Booking itinerary",
@@ -33,7 +33,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "segments=7, trip=yerevan-flexible-city-break",
-        "ms":  1739
+        "ms":  1879
     },
     {
         "name":  "Flight options",
@@ -42,7 +42,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "options=4, segment=00000000-0000-4000-8000-000000000501",
-        "ms":  1703
+        "ms":  1552
     },
     {
         "name":  "Hotel options",
@@ -51,7 +51,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "options=4, segment=00000000-0000-4000-8000-000000000503",
-        "ms":  862
+        "ms":  751
     },
     {
         "name":  "Transfer options",
@@ -60,7 +60,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "options=2, segment=00000000-0000-4000-8000-000000000502",
-        "ms":  804
+        "ms":  759
     },
     {
         "name":  "Activity options",
@@ -69,7 +69,7 @@
         "status":  200,
         "passed":  true,
         "detail":  "options=2, segment=00000000-0000-4000-8000-000000000504",
-        "ms":  806
+        "ms":  777
     },
     {
         "name":  "Select flight option",
@@ -78,7 +78,7 @@
         "status":  201,
         "passed":  true,
         "detail":  "selected=00000000-0000-4000-8000-000000000601, totalDelta=+ SAR0",
-        "ms":  2557
+        "ms":  2314
     },
     {
         "name":  "Create booking linked to option session",
@@ -87,24 +87,114 @@
         "status":  201,
         "passed":  true,
         "detail":  "booking accepted",
-        "ms":  861
+        "ms":  855
+    },
+    {
+        "name":  "Admin dashboard rejects anonymous access",
+        "method":  "GET",
+        "url":  "/api/admin/dashboard",
+        "status":  401,
+        "passed":  true,
+        "detail":  "protected admin route rejects missing credentials",
+        "ms":  62
     },
     {
         "name":  "Admin dashboard preview",
         "method":  "GET",
         "url":  "/api/admin/dashboard",
-        "status":  0,
+        "status":  200,
         "passed":  true,
-        "detail":  "skipped because ADMIN_PREVIEW_TOKEN is not set",
-        "ms":  0
+        "detail":  "metrics=4, bookings=4",
+        "ms":  239
     },
     {
         "name":  "Admin trips resource preview",
         "method":  "GET",
         "url":  "/api/admin/resources/trips",
-        "status":  0,
+        "status":  200,
         "passed":  true,
-        "detail":  "skipped because ADMIN_PREVIEW_TOKEN is not set",
-        "ms":  0
+        "detail":  "rows=1",
+        "ms":  1025
+    },
+    {
+        "name":  "Admin create CMS page",
+        "method":  "POST",
+        "url":  "/api/admin/resources/pages",
+        "status":  201,
+        "passed":  true,
+        "detail":  "page=755afd38-8f12-4afc-81bc-ce78e17e18a3, action=created",
+        "ms":  431
+    },
+    {
+        "name":  "Admin update CMS page",
+        "method":  "PATCH",
+        "url":  "/api/admin/resources/pages/755afd38-8f12-4afc-81bc-ce78e17e18a3",
+        "status":  200,
+        "passed":  true,
+        "detail":  "page=755afd38-8f12-4afc-81bc-ce78e17e18a3, action=updated",
+        "ms":  1453
+    },
+    {
+        "name":  "Admin archive CMS page",
+        "method":  "DELETE",
+        "url":  "/api/admin/resources/pages/755afd38-8f12-4afc-81bc-ce78e17e18a3",
+        "status":  200,
+        "passed":  true,
+        "detail":  "page=755afd38-8f12-4afc-81bc-ce78e17e18a3, action=deleted",
+        "ms":  585
+    },
+    {
+        "name":  "Admin create itinerary segment",
+        "method":  "POST",
+        "url":  "/api/admin/trips/00000000-0000-4000-8000-000000000401/segments",
+        "status":  201,
+        "passed":  true,
+        "detail":  "segment=6d9c1cc4-5277-4c94-a0b1-84bcc70b27b5, action=created",
+        "ms":  1344
+    },
+    {
+        "name":  "Admin create activity option",
+        "method":  "POST",
+        "url":  "/api/admin/trips/00000000-0000-4000-8000-000000000401/segments/6d9c1cc4-5277-4c94-a0b1-84bcc70b27b5/options",
+        "status":  201,
+        "passed":  true,
+        "detail":  "option=c3a6f78e-912e-499e-8d95-cfd8a764ab6a, action=created",
+        "ms":  1375
+    },
+    {
+        "name":  "Admin update activity option",
+        "method":  "PATCH",
+        "url":  "/api/admin/trips/00000000-0000-4000-8000-000000000401/segments/6d9c1cc4-5277-4c94-a0b1-84bcc70b27b5/options/c3a6f78e-912e-499e-8d95-cfd8a764ab6a?type=activity",
+        "status":  200,
+        "passed":  true,
+        "detail":  "option=c3a6f78e-912e-499e-8d95-cfd8a764ab6a, action=updated",
+        "ms":  1660
+    },
+    {
+        "name":  "Admin remove activity option",
+        "method":  "DELETE",
+        "url":  "/api/admin/trips/00000000-0000-4000-8000-000000000401/segments/6d9c1cc4-5277-4c94-a0b1-84bcc70b27b5/options/c3a6f78e-912e-499e-8d95-cfd8a764ab6a?type=activity",
+        "status":  200,
+        "passed":  true,
+        "detail":  "option=c3a6f78e-912e-499e-8d95-cfd8a764ab6a, action=deleted",
+        "ms":  603
+    },
+    {
+        "name":  "Admin archive itinerary segment",
+        "method":  "DELETE",
+        "url":  "/api/admin/trips/00000000-0000-4000-8000-000000000401/segments/6d9c1cc4-5277-4c94-a0b1-84bcc70b27b5",
+        "status":  200,
+        "passed":  true,
+        "detail":  "segment=6d9c1cc4-5277-4c94-a0b1-84bcc70b27b5, action=deleted",
+        "ms":  1524
+    },
+    {
+        "name":  "Admin audit log resource preview",
+        "method":  "GET",
+        "url":  "/api/admin/resources/audit-log",
+        "status":  200,
+        "passed":  true,
+        "detail":  "rows=3",
+        "ms":  37
     }
 ]

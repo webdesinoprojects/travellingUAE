@@ -363,7 +363,7 @@ export function TripList({
                 <button
                   type="button"
                   onClick={openFilterDrawer}
-                  className="inline-flex h-11 items-center gap-2 rounded-lg border border-border-soft bg-surface px-4 text-sm font-extrabold text-brand-navy transition hover:border-brand-blue dark:bg-neutral-950 dark:text-white lg:hidden"
+                  className="inline-flex h-11 items-center gap-2 rounded-lg border border-border-soft bg-surface px-4 text-sm font-extrabold text-brand-navy transition hover:border-brand-blue dark:bg-neutral-950 dark:text-white"
                 >
                   <Filter aria-hidden="true" className="size-4" />
                   Filters
@@ -398,44 +398,10 @@ export function TripList({
             </div>
           </div>
 
-          <div className="mt-5 grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
-            <aside className="hidden lg:block">
-              <div className="sticky top-28">
-                <FilterPanel
-                  durationBounds={durationBounds}
-                  durationMin={draftDurationMin}
-                  durationMax={draftDurationMax}
-                  onDurationMinChange={(value) =>
-                    setDraftDurationMin(Math.min(value, draftDurationMax))
-                  }
-                  onDurationMaxChange={(value) =>
-                    setDraftDurationMax(Math.max(value, draftDurationMin))
-                  }
-                  flightFilter={draftFlightFilter}
-                  onFlightChange={(value) =>
-                    setDraftFlightFilter((current) =>
-                      current === value ? null : value,
-                    )
-                  }
-                  starCounts={starCounts}
-                  selectedStar={draftSelectedStar}
-                  onStarChange={(value) =>
-                    setDraftSelectedStar((current) =>
-                      current === value ? null : value,
-                    )
-                  }
-                  categoryCounts={categoryCounts}
-                  selectedCategories={draftSelectedCategories}
-                  onCategoryChange={toggleDraftCategory}
-                  onReset={resetDraftFilters}
-                  onApply={applyFilters}
-                />
-              </div>
-            </aside>
-
+          <div className="mt-5">
             <div className="min-w-0">
               {filteredPackages.length > 0 ? (
-                <div className="grid gap-5 md:grid-cols-2">
+                <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                   {filteredPackages.map((pkg, index) => (
                     <TripResultCard
                       key={pkg.slug}
@@ -638,7 +604,7 @@ function FilterDrawer({
         onClick={onClose}
         className="absolute inset-0 bg-black/52 backdrop-blur-[2px]"
       />
-      <aside className="absolute left-0 top-0 h-full w-[min(380px,calc(100vw-28px))] overflow-y-auto rounded-r-2xl border-r border-border-soft bg-surface p-4 shadow-[20px_0_56px_rgb(0_0_0/0.28)] dark:bg-black sm:p-5">
+      <aside className="absolute right-0 top-0 h-full w-[min(420px,calc(100vw-28px))] overflow-y-auto rounded-l-2xl border-l border-border-soft bg-surface p-4 shadow-[-20px_0_56px_rgb(0_0_0/0.28)] dark:bg-black sm:p-5">
         <div className="flex items-center justify-between gap-4">
           <h2 className="inline-flex items-center gap-2 text-sm font-extrabold uppercase tracking-[0.18em] text-brand-navy dark:text-white">
             <Filter aria-hidden="true" className="size-4" />
@@ -693,12 +659,7 @@ function FilterPanel({
   onApply,
 }: Omit<Parameters<typeof FilterDrawer>[0], "open" | "onClose">) {
   return (
-    <div className="modern-card mt-4 rounded-lg p-4 lg:mt-0">
-      <div className="hidden items-center gap-2 text-sm font-extrabold uppercase tracking-[0.18em] text-brand-navy dark:text-white lg:flex">
-        <Filter aria-hidden="true" className="size-4" />
-        Filters
-      </div>
-
+    <div className="modern-card mt-4 rounded-lg p-4">
       <FilterSection title="Duration">
         <div className="grid grid-cols-2 gap-2">
           <NumberField

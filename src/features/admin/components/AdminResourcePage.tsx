@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { ArrowRight, Download, Plus, Search } from "lucide-react";
 
+import { AdminCrudPanel } from "@/features/admin/components/AdminCrudPanel";
 import { MetricCard, StatusBadge } from "@/features/admin/components/AdminDashboard";
 import type { AdminResourceConfig, AdminResourceRow } from "@/features/admin/types";
 import { getAdminResourceDTO, type AdminResourceKey } from "@/server/admin/dal";
@@ -27,7 +27,7 @@ export async function AdminResourcePage({ resource }: AdminResourcePageProps) {
         <ResourceQueue config={config} />
       </div>
 
-      <ResourceFormPreview config={config} />
+      <AdminCrudPanel resource={resource} firstRowId={getFirstRowId(config.rows)} />
     </div>
   );
 }
@@ -183,36 +183,8 @@ function ResourceQueue({ config }: { config: AdminResourceConfig }) {
   );
 }
 
-function ResourceFormPreview({ config }: { config: AdminResourceConfig }) {
-  return (
-    <section className="rounded-lg border border-[#d7c5ad] bg-white/78 p-4 shadow-[0_18px_50px_rgb(7_23_57/0.08)] dark:border-white/10 dark:bg-white/[0.06]">
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-brown">
-            Future form area
-          </p>
-          <h2 className="mt-2 text-xl font-black">
-            {config.primaryAction} workflow
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-brand-brown">
-            This preview reserves the space and component shape for the real
-            CRUD form. Later we connect validation, Supabase writes, image
-            picker, and audit logs without redesigning the page.
-          </p>
-        </div>
+function getFirstRowId(rows: AdminResourceRow[]) {
+  const id = rows.find((row) => typeof row.id === "string")?.id;
 
-        <div className="grid gap-3 rounded-lg bg-[#e8f7ff] p-4 dark:bg-white/10">
-          <div className="h-10 rounded-lg bg-white dark:bg-white/10" />
-          <div className="h-10 rounded-lg bg-white dark:bg-white/10" />
-          <div className="h-24 rounded-lg bg-white dark:bg-white/10" />
-          <Link
-            href="/admin"
-            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand-navy px-4 text-sm font-black text-white dark:bg-brand-sand dark:text-brand-navy"
-          >
-            Back to dashboard
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
+  return typeof id === "string" ? id : undefined;
 }

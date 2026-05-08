@@ -5,7 +5,7 @@ import { jsonError, jsonOk, logServerError } from "@/server/http/response";
 import { verifyAdminApiAccess } from "@/server/supabase/auth";
 
 export async function GET(request: NextRequest) {
-  const access = verifyAdminApiAccess(request);
+  const access = await verifyAdminApiAccess(request);
 
   if (!access.ok) {
     return jsonError(access.status, "You are not allowed to access this area.");
@@ -18,4 +18,3 @@ export async function GET(request: NextRequest) {
     return jsonError(500);
   }
 }
-
