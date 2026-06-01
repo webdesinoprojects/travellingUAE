@@ -18,8 +18,8 @@ import {
 
 type AnalyticsPoint = {
   label: string;
-  bookings: number;
-  revenue: number;
+  enquiries: number;
+  converted: number;
 };
 
 type PieSegment = {
@@ -37,7 +37,7 @@ const tooltipStyle = {
 
 const axisTick = { fill: "#a68768", fontSize: 12, fontWeight: 800 };
 
-export function RevenueBarChart({ data }: { data: AnalyticsPoint[] }) {
+export function EnquiryBarChart({ data }: { data: AnalyticsPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ left: -18, right: 8, top: 10 }}>
@@ -50,14 +50,14 @@ export function RevenueBarChart({ data }: { data: AnalyticsPoint[] }) {
         />
         <Legend iconType="circle" wrapperStyle={{ fontSize: 12, fontWeight: 800 }} />
         <Bar
-          dataKey="revenue"
-          name="Revenue index"
+          dataKey="enquiries"
+          name="Enquiries"
           radius={[6, 6, 0, 0]}
           fill="#123f76"
         />
         <Bar
-          dataKey="bookings"
-          name="Bookings"
+          dataKey="converted"
+          name="Converted"
           radius={[6, 6, 0, 0]}
           fill="#e3c39d"
         />
@@ -66,12 +66,12 @@ export function RevenueBarChart({ data }: { data: AnalyticsPoint[] }) {
   );
 }
 
-export function RevenueAreaChart({ data }: { data: AnalyticsPoint[] }) {
+export function ConversionAreaChart({ data }: { data: AnalyticsPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data} margin={{ left: -18, right: 8, top: 8 }}>
         <defs>
-          <linearGradient id="adminRevenue" x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id="adminConversions" x1="0" x2="0" y1="0" y2="1">
             <stop offset="5%" stopColor="#123f76" stopOpacity={0.32} />
             <stop offset="95%" stopColor="#c2e8ff" stopOpacity={0.04} />
           </linearGradient>
@@ -82,11 +82,11 @@ export function RevenueAreaChart({ data }: { data: AnalyticsPoint[] }) {
         <Tooltip contentStyle={tooltipStyle} />
         <Area
           type="monotone"
-          dataKey="revenue"
-          name="Revenue index"
+          dataKey="converted"
+          name="Converted"
           stroke="#123f76"
           strokeWidth={3}
-          fill="url(#adminRevenue)"
+          fill="url(#adminConversions)"
           activeDot={{
             r: 5,
             fill: "#e3c39d",

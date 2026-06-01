@@ -1,11 +1,16 @@
 import { ArrowRight } from "lucide-react";
 import Image from "next/image";
-import { services } from "@/data/travel";
+import Link from "next/link";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { Marquee } from "@/components/ui/Marquee";
 import { TravelIcon } from "@/components/ui/TravelIcon";
+import type { ServiceTile } from "@/types/travel";
 
-export function ServicesStrip() {
+type ServicesStripProps = {
+  services: ServiceTile[];
+};
+
+export function ServicesStrip({ services }: ServicesStripProps) {
   return (
     <section id="services" className="bg-background px-4 py-16 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-[1240px]">
@@ -51,17 +56,19 @@ export function ServicesStrip() {
                   <h3 className="text-lg font-extrabold text-brand-navy dark:text-white">
                     {service.title}
                   </h3>
-                  <p className="mt-2 text-sm leading-6 text-brand-blue/76 dark:text-brand-sky">
-                    Straightforward help, tidy documents, and quick handoffs.
-                  </p>
+                  {service.summary ? (
+                    <p className="mt-2 text-sm leading-6 text-brand-blue/76 dark:text-brand-sky">
+                      {service.summary}
+                    </p>
+                  ) : null}
                 </div>
-                <a
-                  href="#contact"
+                <Link
+                  href="/#contact"
                   aria-label={`Enquire about ${service.title}`}
                   className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-blue text-white transition hover:bg-brand-navy dark:bg-brand-sand dark:text-brand-navy"
                 >
                   <ArrowRight aria-hidden="true" className="size-5" />
-                </a>
+                </Link>
               </div>
             </article>
           ))}

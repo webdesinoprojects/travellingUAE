@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
-import { revalidatePath } from "next/cache";
 
 import { createSegmentOption } from "@/server/admin/itinerary-resources";
+import { revalidateTripSurfaces } from "@/server/admin/revalidation";
 import { jsonError, jsonOk, logServerError } from "@/server/http/response";
 import { verifyAdminApiAccess } from "@/server/supabase/auth";
 
@@ -24,8 +24,7 @@ export async function POST(
       access.actor,
     );
 
-    revalidatePath("/admin/trips");
-    revalidatePath("/trips");
+    revalidateTripSurfaces();
 
     return jsonOk(result, { status: 201 });
   } catch (error) {

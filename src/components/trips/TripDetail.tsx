@@ -1,8 +1,11 @@
 import {
+  BadgeCheck,
   BedDouble,
+  Ban,
   CalendarDays,
   Check,
   ChevronDown,
+  FileText,
   Hotel,
   Plane,
   Route,
@@ -26,7 +29,7 @@ type TripDetailProps = {
 };
 
 export function TripDetail({ destination, pkg, itinerary }: TripDetailProps) {
-  const fallbackItinerary = buildItinerary(pkg);
+  const fallbackItinerary = getDetailItineraryDays(pkg);
   const recommended = destination.packages
     .filter((item) => item.slug !== pkg.slug)
     .concat(destination.packages)
@@ -77,6 +80,7 @@ export function TripDetail({ destination, pkg, itinerary }: TripDetailProps) {
               </div>
             </section>
 
+            <HighlightsSection pkg={pkg} />
             <IncludedSection pkg={pkg} />
             {itinerary?.segments.length ? (
               <TripItineraryPlanner
@@ -88,6 +92,7 @@ export function TripDetail({ destination, pkg, itinerary }: TripDetailProps) {
             ) : (
               <ItinerarySection days={fallbackItinerary} images={pkg.gallery} />
             )}
+            <FinePrintSection pkg={pkg} />
           </article>
 
           <BookingCard pkg={pkg} />
@@ -143,15 +148,19 @@ function Stat({
 function IncludedSection({ pkg }: { pkg: TripPackage }) {
   const items = pkg.inclusions.slice(0, 6);
 
+  if (items.length === 0) {
+    return null;
+  }
+
   return (
     <section className="mt-10">
       <h2 className="text-3xl font-extrabold tracking-tight">
         What&apos;s Included
       </h2>
       <div className="modern-card mt-5 grid gap-4 rounded-lg p-5 sm:grid-cols-2">
-        {items.map((item) => (
+        {items.map((item, index) => (
           <div
-            key={item}
+            key={`${item}-${index}`}
             className="flex items-center gap-3 text-sm font-extrabold text-brand-navy dark:text-white"
           >
             <span className="grid size-5 shrink-0 place-items-center rounded bg-brand-navy text-white dark:bg-brand-sand dark:text-brand-navy">
@@ -161,6 +170,98 @@ function IncludedSection({ pkg }: { pkg: TripPackage }) {
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function HighlightsSection({ pkg }: { pkg: TripPackage }) {
+  const items = pkg.highlights.slice(0, 6);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-10">
+      <h2 className="text-3xl font-extrabold tracking-tight">
+        Trip Highlights
+      </h2>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {items.map((item, index) => (
+          <div
+            key={`${item}-${index}`}
+            className="modern-card flex gap-3 rounded-lg p-4 text-sm font-semibold leading-6 text-brand-navy/75 dark:text-white/75"
+          >
+            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-brand-sky text-brand-navy">
+              <BadgeCheck aria-hidden="true" className="size-4" />
+            </span>
+            {item}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FinePrintSection({ pkg }: { pkg: TripPackage }) {
+  const exclusions = pkg.exclusions.slice(0, 8);
+  const terms = pkg.terms?.slice(0, 8) ?? [];
+
+  if (exclusions.length === 0 && terms.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-12 grid gap-5 lg:grid-cols-2">
+      <TripTextList
+        icon={Ban}
+        title="Not Included"
+        items={exclusions}
+        empty="Package exclusions will be confirmed by the travel desk."
+      />
+      <TripTextList
+        icon={FileText}
+        title="Terms"
+        items={terms}
+        empty="Package terms will be confirmed before enquiry submission."
+      />
+    </section>
+  );
+}
+
+function TripTextList({
+  icon: Icon,
+  title,
+  items,
+  empty,
+}: {
+  icon: LucideIcon;
+  title: string;
+  items: string[];
+  empty: string;
+}) {
+  return (
+    <section className="modern-card rounded-lg p-5">
+      <h2 className="inline-flex items-center gap-2 text-xl font-extrabold">
+        <span className="grid size-8 place-items-center rounded-lg bg-surface-muted text-brand-blue dark:bg-white/[0.08] dark:text-brand-sand">
+          <Icon aria-hidden="true" className="size-4" />
+        </span>
+        {title}
+      </h2>
+      {items.length ? (
+        <ul className="mt-4 grid gap-3 text-sm font-semibold leading-6 text-brand-navy/72 dark:text-white/72">
+          {items.map((item, index) => (
+            <li key={`${title}-${item}-${index}`} className="flex gap-3">
+              <span className="mt-2 size-1.5 shrink-0 rounded-full bg-brand-brown" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-4 text-sm font-semibold leading-6 text-brand-navy/62 dark:text-white/62">
+          {empty}
+        </p>
+      )}
     </section>
   );
 }
@@ -395,6 +496,18 @@ function buildItinerary(pkg: TripPackage): ItineraryDay[] {
     title: titles[index] ?? `Day ${index + 1} experience`,
     description: baseDescriptions[index] ?? baseDescriptions.at(-1)!,
   }));
+}
+
+function getDetailItineraryDays(pkg: TripPackage): ItineraryDay[] {
+  if (pkg.itinerary?.days.length) {
+    return pkg.itinerary.days.map((item, index) => ({
+      day: `Day ${index + 1}`,
+      title: item.title,
+      description: item.description,
+    }));
+  }
+
+  return buildItinerary(pkg);
 }
 
 function tripCode(pkg: TripPackage) {

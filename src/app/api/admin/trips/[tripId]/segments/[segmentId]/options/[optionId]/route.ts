@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
-import { revalidatePath } from "next/cache";
 
 import {
   deleteSegmentOption,
   updateSegmentOption,
 } from "@/server/admin/itinerary-resources";
+import { revalidateTripSurfaces } from "@/server/admin/revalidation";
 import { jsonError, jsonOk, logServerError } from "@/server/http/response";
 import { verifyAdminApiAccess } from "@/server/supabase/auth";
 
@@ -29,8 +29,7 @@ export async function PATCH(
       actor: access.actor,
     });
 
-    revalidatePath("/admin/trips");
-    revalidatePath("/trips");
+    revalidateTripSurfaces();
 
     return jsonOk(result);
   } catch (error) {
@@ -59,8 +58,7 @@ export async function DELETE(
       actor: access.actor,
     });
 
-    revalidatePath("/admin/trips");
-    revalidatePath("/trips");
+    revalidateTripSurfaces();
 
     return jsonOk(result);
   } catch (error) {

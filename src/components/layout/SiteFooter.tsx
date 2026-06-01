@@ -1,16 +1,21 @@
 import { ArrowRight, Mail, MapPin, Phone } from "lucide-react";
-import { footerColumns } from "@/data/travel";
+import Link from "next/link";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { SocialBrandIcon } from "@/components/ui/SocialBrandIcon";
+import { getPublicFooterColumns, getPublicFooterSettings } from "@/server/public/cms";
+import type { FooterColumn as FooterColumnData } from "@/types/travel";
 
-const footerSocials = [
-  { label: "Facebook", tone: "facebook" as const },
-  { label: "YouTube", tone: "youtube" as const },
-  { label: "Instagram", tone: "instagram" as const },
-  { label: "LinkedIn", tone: "linkedin" as const },
-];
+export async function SiteFooter() {
+  const [footerColumns, footerSettings] = await Promise.all([
+    getPublicFooterColumns(),
+    getPublicFooterSettings(),
+  ]);
+  const companyColumn = footerColumns[0] ?? { title: "Company", links: [] };
+  const travelColumn = footerColumns[1] ?? { title: "Travel Desk", links: [] };
+  const legalColumn = footerColumns[2] ?? { title: "Legal", links: [] };
+  const { contact, socialLinks } = footerSettings;
+  const visibleSocialLinks = socialLinks.filter((l) => l.href.startsWith("https://"));
 
-export function SiteFooter() {
   return (
     <footer
       id="contact"
@@ -51,52 +56,60 @@ export function SiteFooter() {
         <div className="mt-14 grid gap-10 lg:grid-cols-[1.25fr_0.7fr_1fr_0.85fr]">
           <div>
             <BrandLogo tone="light" />
-            <p className="mt-6 max-w-xs text-sm font-medium leading-7 text-brand-sky">
-              Fly Time connects flights, stays, visas and destination support
-              into a booking flow that feels calm from enquiry to departure.
-            </p>
-            <div className="mt-7 flex gap-3">
-              {footerSocials.map((item) => (
-                <a
-                  key={item.label}
-                  href="#"
-                  aria-label={item.label}
-                  className="grid size-9 place-items-center rounded-lg border border-white/15 text-brand-sky transition hover:bg-white/10 hover:text-white"
-                >
-                  <SocialBrandIcon tone={item.tone} />
-                </a>
-              ))}
-            </div>
+            {contact.tagline ? (
+              <p className="mt-6 max-w-xs text-sm font-medium leading-7 text-brand-sky">
+                {contact.tagline}
+              </p>
+            ) : null}
+            {visibleSocialLinks.length > 0 ? (
+              <div className="mt-7 flex gap-3">
+                {visibleSocialLinks.map((item) => (
+                  <a
+                    key={item.platform}
+                    href={item.href}
+                    aria-label={item.label}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="grid size-9 place-items-center rounded-lg border border-white/15 text-brand-sky transition hover:bg-white/10 hover:text-white"
+                  >
+                    <SocialBrandIcon tone={item.platform} />
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </div>
 
-          <FooterColumn title={footerColumns[0].title} links={footerColumns[0].links} />
+          <FooterColumnBlock column={companyColumn} />
 
-          <FooterColumn title={footerColumns[1].title} links={footerColumns[1].links} />
+          <FooterColumnBlock column={travelColumn} />
 
           <div>
             <h3 className="text-sm font-extrabold uppercase text-brand-sand">
               Contact Us
             </h3>
             <div className="mt-5 grid gap-4 text-sm font-medium leading-6 text-brand-sky">
-              <p className="flex gap-3">
-                <MapPin aria-hidden="true" className="mt-1 size-4 shrink-0" />
-                Head Office, BKM Hospital Bldg. Bypass Road, Payyanur, Kannur
-              </p>
-              <p className="flex gap-3">
-                <Phone aria-hidden="true" className="mt-1 size-4 shrink-0" />
-                +91 904 831 77 11
-              </p>
-              <p className="flex gap-3">
-                <Mail aria-hidden="true" className="mt-1 size-4 shrink-0" />
-                hello@flytime.example
-              </p>
+              {contact.address ? (
+                <p className="flex gap-3">
+                  <MapPin aria-hidden="true" className="mt-1 size-4 shrink-0" />
+                  {contact.address}
+                </p>
+              ) : null}
+              {contact.phone ? (
+                <p className="flex gap-3">
+                  <Phone aria-hidden="true" className="mt-1 size-4 shrink-0" />
+                  {contact.phone}
+                </p>
+              ) : null}
+              {contact.email ? (
+                <p className="flex gap-3">
+                  <Mail aria-hidden="true" className="mt-1 size-4 shrink-0" />
+                  {contact.email}
+                </p>
+              ) : null}
             </div>
 
             <div className="mt-9">
-              <FooterColumn
-                title={footerColumns[2].title}
-                links={footerColumns[2].links}
-              />
+              <FooterColumnBlock column={legalColumn} />
             </div>
           </div>
         </div>
@@ -109,18 +122,18 @@ export function SiteFooter() {
   );
 }
 
-function FooterColumn({ title, links }: { title: string; links: string[] }) {
+function FooterColumnBlock({ column }: { column: FooterColumnData }) {
   return (
     <div>
       <h3 className="text-sm font-extrabold uppercase text-brand-sand">
-        {title}
+        {column.title}
       </h3>
       <ul className="mt-5 grid gap-3 text-sm font-medium text-brand-sky">
-        {links.map((link) => (
-          <li key={link}>
-            <a href="#" className="transition hover:text-white">
-              {link}
-            </a>
+        {column.links.map((link) => (
+          <li key={`${column.title}-${link.href}-${link.label}`}>
+            <Link href={link.href} className="transition hover:text-white">
+              {link.label}
+            </Link>
           </li>
         ))}
       </ul>

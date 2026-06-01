@@ -15,10 +15,15 @@ export function generateStaticParams() {
 
 export default async function AdminResourceRoutePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ resource: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { resource } = await params;
+  const [{ resource }, resolvedSearchParams] = await Promise.all([
+    params,
+    searchParams,
+  ]);
 
   if (!isAdminResource(resource)) {
     notFound();
@@ -34,5 +39,10 @@ export default async function AdminResourceRoutePage({
       : "editor",
   );
 
-  return <AdminResourcePage resource={resource} />;
+  return (
+    <AdminResourcePage
+      resource={resource}
+      searchParams={resolvedSearchParams}
+    />
+  );
 }

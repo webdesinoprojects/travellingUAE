@@ -1,21 +1,27 @@
 import { ArrowUpRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { bentoPackages } from "@/data/travel";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import type { PublicHomeSectionCopy } from "@/types/home";
+import type { BentoPackage } from "@/types/travel";
 
-export function PackageBento() {
+type PackageBentoProps = {
+  packages: BentoPackage[];
+  section: PublicHomeSectionCopy;
+};
+
+export function PackageBento({ packages, section }: PackageBentoProps) {
   return (
     <section id="packages" className="bg-surface px-4 py-16 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-[1240px]">
         <SectionHeading
-          eyebrow="Holiday Lanes"
-          title="Routes People Ask For"
-          description="A visual board of short breaks, city stays, alpine escapes and Eid routes that can open directly into available packages."
+          eyebrow={section.eyebrow}
+          title={section.title}
+          description={section.description}
         />
 
         <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4 lg:grid-rows-[260px_260px]">
-          {bentoPackages.map((pkg) => (
+          {packages.map((pkg) => (
             <PackageCard key={pkg.title} pkg={pkg} />
           ))}
         </div>
@@ -24,7 +30,7 @@ export function PackageBento() {
   );
 }
 
-function PackageCard({ pkg }: { pkg: (typeof bentoPackages)[number] }) {
+function PackageCard({ pkg }: { pkg: BentoPackage }) {
   const href = pkg.href ?? "/trips";
   const layoutClass =
     pkg.size === "featured"

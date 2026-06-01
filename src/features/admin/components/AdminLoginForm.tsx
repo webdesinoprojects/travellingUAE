@@ -4,8 +4,6 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LockKeyhole, Loader2, Mail } from "lucide-react";
 
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-
 type LoginState = {
   status: "idle" | "loading" | "error";
   message: string;
@@ -23,6 +21,7 @@ export function AdminLoginForm() {
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") ?? "").trim();
     const password = String(form.get("password") ?? "");
+    const rememberMe = form.get("rememberMe") === "on";
 
     if (!email || !password) {
       setState({
@@ -35,24 +34,13 @@ export function AdminLoginForm() {
     setState({ status: "loading", message: "Checking access..." });
 
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error || !data.session?.access_token) {
-        throw new Error("invalid-login");
-      }
-
       const response = await fetch("/api/admin/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken: data.session.access_token }),
+        body: JSON.stringify({ email, password, rememberMe }),
       });
 
       if (!response.ok) {
-        await supabase.auth.signOut();
         throw new Error("session-rejected");
       }
 
@@ -110,6 +98,16 @@ export function AdminLoginForm() {
             disabled={isBusy}
           />
         </span>
+      </label>
+
+      <label className="flex cursor-pointer items-center gap-3 text-sm font-bold text-brand-brown">
+        <input
+          name="rememberMe"
+          type="checkbox"
+          className="size-4 accent-brand-navy dark:accent-brand-sand"
+          disabled={isBusy}
+        />
+        Keep me signed in for 30 days on this device
       </label>
 
       {state.status === "error" ? (

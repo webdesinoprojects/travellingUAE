@@ -3,8 +3,8 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { ADMIN_SESSION_COOKIE } from "@/lib/admin/session";
 import {
-  ADMIN_SESSION_COOKIE,
   verifyAdminAccessToken,
   type AdminRole,
 } from "@/server/supabase/auth";

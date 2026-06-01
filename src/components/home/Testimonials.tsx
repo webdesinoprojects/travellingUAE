@@ -1,6 +1,6 @@
 import Image from "next/image";
-import { testimonials } from "@/data/travel";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import type { Testimonial } from "@/types/travel";
 
 const bentoSpans = [
   "lg:col-span-2",
@@ -11,7 +11,11 @@ const bentoSpans = [
   "lg:col-span-1",
 ];
 
-export function Testimonials() {
+type TestimonialsProps = {
+  testimonials: Testimonial[];
+};
+
+export function Testimonials({ testimonials }: TestimonialsProps) {
   return (
     <section className="bg-brand-sky/38 px-4 py-16 text-brand-navy dark:bg-brand-navy dark:text-white sm:px-6 lg:px-10">
       <div className="mx-auto max-w-[1240px]">

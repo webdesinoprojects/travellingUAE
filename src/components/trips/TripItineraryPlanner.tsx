@@ -351,7 +351,7 @@ function SegmentCard({
           <button
             type="button"
             onClick={onChange}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 text-sm font-extrabold text-white transition hover:bg-brand-navy dark:bg-brand-sand dark:text-brand-navy"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 text-sm font-extrabold text-white transition hover:bg-brand-blue-strong dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
           >
             Change Option
             <ArrowRight aria-hidden="true" className="size-4" />
@@ -470,7 +470,7 @@ function OptionPanel({
             <button
               type="button"
               onClick={() => onReload(panel.query, panel.sort)}
-              className="h-11 rounded-lg bg-brand-blue px-4 text-sm font-extrabold text-white transition hover:bg-brand-navy dark:bg-brand-sand dark:text-brand-navy"
+              className="h-11 rounded-lg bg-brand-blue px-4 text-sm font-extrabold text-white transition hover:bg-brand-blue-strong dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
             >
               Apply
             </button>
@@ -543,7 +543,7 @@ function OptionChoice({
             type="button"
             disabled={disabled}
             onClick={onSelect}
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-brand-blue text-sm font-extrabold text-white transition hover:bg-brand-navy disabled:cursor-not-allowed disabled:opacity-55 dark:bg-brand-sand dark:text-brand-navy"
+            className="inline-flex h-11 items-center justify-center rounded-lg bg-brand-blue text-sm font-extrabold text-white transition hover:bg-brand-blue-strong disabled:cursor-not-allowed disabled:opacity-55 dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
           >
             {disabled ? (
               <Loader2 aria-hidden="true" className="mr-2 size-4 animate-spin" />

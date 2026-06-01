@@ -211,14 +211,14 @@ export const activityFeed: AdminActivity[] = [
 ];
 
 export const chartPoints: AdminChartPoint[] = [
-  { label: "Jan", bookings: 34, revenue: 58 },
-  { label: "Feb", bookings: 42, revenue: 64 },
-  { label: "Mar", bookings: 58, revenue: 82 },
-  { label: "Apr", bookings: 46, revenue: 74 },
-  { label: "May", bookings: 72, revenue: 96 },
-  { label: "Jun", bookings: 64, revenue: 88 },
-  { label: "Jul", bookings: 86, revenue: 110 },
-  { label: "Aug", bookings: 54, revenue: 76 },
+  { label: "Jan", enquiries: 34, converted: 14 },
+  { label: "Feb", enquiries: 42, converted: 16 },
+  { label: "Mar", enquiries: 58, converted: 22 },
+  { label: "Apr", enquiries: 46, converted: 18 },
+  { label: "May", enquiries: 72, converted: 29 },
+  { label: "Jun", enquiries: 64, converted: 26 },
+  { label: "Jul", enquiries: 86, converted: 35 },
+  { label: "Aug", enquiries: 54, converted: 21 },
 ];
 
 export const calendarDays: AdminCalendarDay[] = Array.from({ length: 30 }, (_, index) => {

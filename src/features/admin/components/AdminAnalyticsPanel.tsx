@@ -6,8 +6,8 @@ import { ArrowUpRight, PieChart, TrendingUp } from "lucide-react";
 
 type AnalyticsPoint = {
   label: string;
-  bookings: number;
-  revenue: number;
+  enquiries: number;
+  converted: number;
 };
 
 type Period = "week" | "month" | "year";
@@ -18,16 +18,16 @@ type PieSegment = {
   color: string;
 };
 
-const RevenueBarChart = dynamic(
-  () => import("@/features/admin/components/AdminRecharts").then((mod) => mod.RevenueBarChart),
+const EnquiryBarChart = dynamic(
+  () => import("@/features/admin/components/AdminRecharts").then((mod) => mod.EnquiryBarChart),
   {
     ssr: false,
     loading: () => <ChartPlaceholder />,
   },
 );
 
-const RevenueAreaChart = dynamic(
-  () => import("@/features/admin/components/AdminRecharts").then((mod) => mod.RevenueAreaChart),
+const ConversionAreaChart = dynamic(
+  () => import("@/features/admin/components/AdminRecharts").then((mod) => mod.ConversionAreaChart),
   {
     ssr: false,
     loading: () => <ChartPlaceholder />,
@@ -57,13 +57,17 @@ export function AdminAnalyticsPanel({
     () =>
       data.reduce(
         (acc, point) => ({
-          bookings: acc.bookings + point.bookings,
-          revenue: acc.revenue + point.revenue,
+          enquiries: acc.enquiries + point.enquiries,
+          converted: acc.converted + point.converted,
         }),
-        { bookings: 0, revenue: 0 },
+        { enquiries: 0, converted: 0 },
       ),
     [data],
   );
+  const conversionPercent =
+    totals.enquiries === 0
+      ? 0
+      : Math.round((totals.converted / totals.enquiries) * 100);
 
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -74,41 +78,37 @@ export function AdminAnalyticsPanel({
               Analytics
             </p>
             <h2 className="mt-1 text-xl font-black tracking-tight">
-              Booking and revenue graph
+              Enquiry pipeline
             </h2>
           </div>
           <PeriodToggle value={period} onChange={setPeriod} />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <AnalyticsMiniCard label="Revenue index" value={totals.revenue} suffix="k" />
-          <AnalyticsMiniCard label="Bookings" value={totals.bookings} />
-          <AnalyticsMiniCard
-            label="Avg value"
-            value={Math.round((totals.revenue * 1000) / Math.max(totals.bookings, 1))}
-            prefix="SAR "
-          />
+          <AnalyticsMiniCard label="Enquiries" value={totals.enquiries} />
+          <AnalyticsMiniCard label="Converted" value={totals.converted} />
+          <AnalyticsMiniCard label="Conversion" value={conversionPercent} suffix="%" />
         </div>
 
         <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="rounded-lg border border-[#d7c5ad] bg-[#fffaf2] p-3 dark:border-white/10 dark:bg-black/20">
             <div className="h-[310px] min-w-0">
-              <RevenueBarChart data={data} />
+              <EnquiryBarChart data={data} />
             </div>
           </div>
 
           <div className="rounded-lg border border-[#d7c5ad] bg-[#fffaf2] p-3 dark:border-white/10 dark:bg-black/20">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-black uppercase text-brand-brown">
-                Revenue trend
+                Conversion trend
               </span>
               <span className="inline-flex items-center gap-1 text-xs font-black text-brand-blue dark:text-brand-sand">
                 <TrendingUp aria-hidden="true" className="size-3.5" />
-                +12.8%
+                {conversionPercent}% conversion
               </span>
             </div>
             <div className="h-[260px] min-w-0">
-              <RevenueAreaChart data={data} />
+              <ConversionAreaChart data={data} />
             </div>
           </div>
         </div>

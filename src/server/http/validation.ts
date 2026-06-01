@@ -45,7 +45,7 @@ export function readString(
 
   const trimmed = value.trim();
 
-  if (required && trimmed.length < min) {
+  if (trimmed.length < min) {
     throw new Error(`${key} is too short`);
   }
 
@@ -115,4 +115,3 @@ export function readDateString(source: UnknownRecord, key: string) {
 
   return value;
 }
-

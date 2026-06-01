@@ -25,29 +25,29 @@ export const adminResourceKeys = Object.keys(resourceConfigs) as Array<
 
 const analytics: AdminDashboardDTO["analytics"] = {
   week: [
-    { label: "Mon", bookings: 18, revenue: 24 },
-    { label: "Tue", bookings: 24, revenue: 34 },
-    { label: "Wed", bookings: 21, revenue: 31 },
-    { label: "Thu", bookings: 32, revenue: 45 },
-    { label: "Fri", bookings: 29, revenue: 41 },
-    { label: "Sat", bookings: 38, revenue: 56 },
-    { label: "Sun", bookings: 34, revenue: 48 },
+    { label: "Mon", enquiries: 18, converted: 6 },
+    { label: "Tue", enquiries: 24, converted: 8 },
+    { label: "Wed", enquiries: 21, converted: 7 },
+    { label: "Thu", enquiries: 32, converted: 12 },
+    { label: "Fri", enquiries: 29, converted: 10 },
+    { label: "Sat", enquiries: 38, converted: 16 },
+    { label: "Sun", enquiries: 34, converted: 14 },
   ],
   month: [
-    { label: "W1", bookings: 84, revenue: 112 },
-    { label: "W2", bookings: 108, revenue: 148 },
-    { label: "W3", bookings: 96, revenue: 132 },
-    { label: "W4", bookings: 126, revenue: 176 },
+    { label: "W1", enquiries: 84, converted: 31 },
+    { label: "W2", enquiries: 108, converted: 39 },
+    { label: "W3", enquiries: 96, converted: 37 },
+    { label: "W4", enquiries: 126, converted: 48 },
   ],
   year: [
-    { label: "Jan", bookings: 340, revenue: 580 },
-    { label: "Feb", bookings: 420, revenue: 640 },
-    { label: "Mar", bookings: 580, revenue: 820 },
-    { label: "Apr", bookings: 460, revenue: 740 },
-    { label: "May", bookings: 720, revenue: 960 },
-    { label: "Jun", bookings: 640, revenue: 880 },
-    { label: "Jul", bookings: 860, revenue: 1100 },
-    { label: "Aug", bookings: 540, revenue: 760 },
+    { label: "Jan", enquiries: 340, converted: 132 },
+    { label: "Feb", enquiries: 420, converted: 164 },
+    { label: "Mar", enquiries: 580, converted: 228 },
+    { label: "Apr", enquiries: 460, converted: 182 },
+    { label: "May", enquiries: 720, converted: 301 },
+    { label: "Jun", enquiries: 640, converted: 267 },
+    { label: "Jul", enquiries: 860, converted: 352 },
+    { label: "Aug", enquiries: 540, converted: 211 },
   ],
 };
 
@@ -61,6 +61,7 @@ const pieSegments: AdminPieSegment[] = [
 
 export function getFallbackAdminDashboardDTO(): AdminDashboardDTO {
   return {
+    dataSource: "fallback",
     metrics: adminMetrics,
     packageCards: adminPackageCards,
     bookings: adminBookings,
@@ -73,6 +74,12 @@ export function getFallbackAdminDashboardDTO(): AdminDashboardDTO {
     analytics,
     pieSegments,
     activePipelinePercent: 86,
+    tripHealth: {
+      total: 100,
+      published: 67,
+      draft: 26,
+      archived: 7,
+    },
   };
 }
 
@@ -85,4 +92,3 @@ export function getFallbackAdminResourceConfig(
 export function getFallbackAnalytics(): Record<string, AdminChartPoint[]> {
   return analytics;
 }
-

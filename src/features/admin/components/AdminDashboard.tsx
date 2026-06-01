@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { AdminAnalyticsPanel } from "@/features/admin/components/AdminAnalyticsPanel";
+import { StatusBadge } from "@/features/admin/components/StatusBadge";
 import type {
   AdminActivity,
   AdminBooking,
@@ -21,7 +22,7 @@ import type {
   AdminPackageCard,
   AdminQueueItem,
   AdminQuickAction,
-  AdminStatus,
+  AdminTripHealth,
 } from "@/features/admin/types";
 import { getAdminDashboardDTO } from "@/server/admin/dal";
 
@@ -34,12 +35,13 @@ export async function AdminDashboard() {
         <DashboardHero
           finance={dashboard.finance}
           quickActions={dashboard.quickActions}
+          dataSource={dashboard.dataSource}
         />
         <MetricGrid metrics={dashboard.metrics} />
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
           <TravelPackages packages={dashboard.packageCards} />
-          <TripHealthCard />
+          <TripHealthCard health={dashboard.tripHealth} />
         </div>
 
         <AdminAnalyticsPanel
@@ -64,9 +66,11 @@ export async function AdminDashboard() {
 function DashboardHero({
   finance,
   quickActions,
+  dataSource,
 }: {
   finance: AdminFinanceItem[];
   quickActions: AdminQuickAction[];
+  dataSource: "database" | "fallback";
 }) {
   return (
     <section className="overflow-hidden rounded-lg border border-[#d7c5ad] bg-brand-navy text-white shadow-[0_22px_70px_rgb(7_23_57/0.18)] dark:border-white/10">
@@ -74,15 +78,15 @@ function DashboardHero({
         <div>
           <div className="mb-4 inline-flex items-center gap-2 rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-black uppercase text-brand-sand">
             <CheckCircle2 aria-hidden="true" className="size-4" />
-            Client preview mode
+            {dataSource === "database" ? "Live operations" : "Preview data"}
           </div>
           <h2 className="max-w-3xl font-serif text-2xl font-black tracking-tight sm:text-3xl lg:text-4xl">
-            Control room for trips, bookings and content.
+            Control room for trips, enquiries and content.
           </h2>
           <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-[#c2e8ff]">
-            This is mock data, but every card follows the backend entities we
-            already modeled: trips, destinations, bookings, media, pages,
-            translations and admin activity.
+            {dataSource === "database"
+              ? "Protected operational summaries are loaded from backend records. Revenue will appear only after payment and supplier integrations are enabled."
+              : "Backend configuration is unavailable in this environment. These values are interface preview data only."}
           </p>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -208,11 +212,15 @@ function TravelPackages({ packages }: { packages: AdminPackageCard[] }) {
       href="/admin/trips"
       className="min-w-0"
     >
-      <div className="grid gap-4 md:grid-cols-3">
-        {packages.map((pkg) => (
-          <PackageCard key={pkg.title} pkg={pkg} />
-        ))}
-      </div>
+      {packages.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-3">
+          {packages.map((pkg) => (
+            <PackageCard key={pkg.title} pkg={pkg} />
+          ))}
+        </div>
+      ) : (
+        <EmptyPanel text="No published packages are available." />
+      )}
     </AdminPanel>
   );
 }
@@ -257,10 +265,12 @@ function PackageCard({ pkg }: { pkg: AdminPackageCard }) {
   );
 }
 
-function TripHealthCard() {
-  const published = 67;
-  const drafts = 26;
-  const missing = 7;
+function TripHealthCard({ health }: { health: AdminTripHealth }) {
+  const total = Math.max(health.total, 1);
+  const published = Math.round((health.published / total) * 100);
+  const drafts = Math.round((health.draft / total) * 100);
+  const archived =
+    health.total === 0 ? 0 : Math.max(0, 100 - published - drafts);
 
   return (
     <AdminPanel title="Trip overview">
@@ -268,12 +278,15 @@ function TripHealthCard() {
         <div
           className="grid size-48 place-items-center rounded-full"
           style={{
-            background: `conic-gradient(#071739 0 ${published}%, #123f76 ${published}% ${published + drafts}%, #e3c39d ${published + drafts}% 100%)`,
+            background:
+              health.total === 0
+                ? "#ead7bd"
+                : `conic-gradient(#071739 0 ${published}%, #123f76 ${published}% ${published + drafts}%, #e3c39d ${published + drafts}% 100%)`,
           }}
         >
           <div className="grid size-32 place-items-center rounded-full bg-[#fffaf2] text-center dark:bg-black">
             <div>
-              <p className="text-3xl font-black">74</p>
+              <p className="text-3xl font-black">{health.published}</p>
               <p className="text-xs font-bold text-brand-brown">Live trips</p>
             </div>
           </div>
@@ -281,19 +294,23 @@ function TripHealthCard() {
       </div>
       <div className="mt-3 grid grid-cols-3 gap-3">
         {[
-          ["Published", published],
-          ["Draft", drafts],
-          ["Missing", missing],
+          ["Published", health.published],
+          ["Draft", health.draft],
+          ["Archived", health.archived],
         ].map(([label, value]) => (
           <div
             key={label}
             className="rounded-lg border border-[#d7c5ad] bg-[#fffaf2] p-3 text-center dark:border-white/10 dark:bg-white/[0.06]"
           >
-            <p className="text-xl font-black">{value}%</p>
+            <p className="text-xl font-black">{value}</p>
             <p className="text-xs font-bold text-brand-brown">{label}</p>
           </div>
         ))}
       </div>
+      <p className="sr-only">
+        Status distribution: {published}% published, {drafts}% draft,{" "}
+        {archived}% archived.
+      </p>
     </AdminPanel>
   );
 }
@@ -333,7 +350,7 @@ function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
       toolbar={<SearchBox placeholder="Search booking, guest, status" />}
     >
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[780px] text-left text-sm">
+        {bookings.length > 0 ? <table className="w-full min-w-[780px] text-left text-sm">
           <thead>
             <tr className="border-b border-[#d7c5ad] text-xs uppercase tracking-[0.14em] text-brand-brown dark:border-white/10">
               <th className="py-3 pr-4">Booking</th>
@@ -349,7 +366,7 @@ function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
               <BookingRow key={booking.id} booking={booking} />
             ))}
           </tbody>
-        </table>
+        </table> : <EmptyPanel text="No recent enquiries are available." />}
       </div>
     </AdminPanel>
   );
@@ -423,7 +440,7 @@ function TopDestinations({
 }) {
   return (
     <AdminPanel title="Top destinations" action="Manage" href="/admin/destinations">
-      <div className="grid gap-4">
+      {destinations.length > 0 ? <div className="grid gap-4">
         {destinations.map((destination) => (
           <div key={destination.name}>
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -433,7 +450,7 @@ function TopDestinations({
                   {destination.packages} packages - {destination.bookings} bookings
                 </p>
               </div>
-              <span className="text-sm font-black">{destination.completion}%</span>
+              <span className="text-sm font-black">{destination.completion}% relative</span>
             </div>
             <div className="h-2 rounded-full bg-[#e8f7ff] dark:bg-white/10">
               <div
@@ -443,7 +460,7 @@ function TopDestinations({
             </div>
           </div>
         ))}
-      </div>
+      </div> : <EmptyPanel text="No destination activity is available." />}
     </AdminPanel>
   );
 }
@@ -452,7 +469,7 @@ function ActivityFeed({ activities }: { activities: AdminActivity[] }) {
   return (
     <AdminPanel title="Recent activity">
       <div className="grid gap-4">
-        {activities.map((activity) => (
+        {activities.length > 0 ? activities.map((activity) => (
           <div key={activity.title} className="flex gap-3">
             <div
               className={[
@@ -474,7 +491,7 @@ function ActivityFeed({ activities }: { activities: AdminActivity[] }) {
               </p>
             </div>
           </div>
-        ))}
+        )) : <EmptyPanel text="No protected admin activity recorded." />}
       </div>
     </AdminPanel>
   );
@@ -538,27 +555,7 @@ export function AdminPanel({
   );
 }
 
-export function StatusBadge({ status }: { status: AdminStatus }) {
-  const label = status.replace("-", " ");
-  const className =
-    status === "published" ||
-    status === "confirmed" ||
-    status === "completed"
-      ? "bg-[#e8f7ff] text-brand-blue dark:bg-white/10 dark:text-brand-sand"
-      : status === "new" || status === "draft" || status === "scheduled"
-        ? "bg-[#fff3df] text-[#8a5f31] dark:bg-brand-sand/15 dark:text-brand-sand"
-        : status === "missing" || status === "cancelled"
-          ? "bg-[#ffe8e2] text-[#a33b1f] dark:bg-red-500/15 dark:text-red-200"
-          : "bg-[#ead7bd] text-brand-navy dark:bg-white/10 dark:text-white";
-
-  return (
-    <span
-      className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-black capitalize ${className}`}
-    >
-      {label}
-    </span>
-  );
-}
+export { StatusBadge } from "@/features/admin/components/StatusBadge";
 
 export function SearchBox({ placeholder }: { placeholder: string }) {
   return (
@@ -566,5 +563,13 @@ export function SearchBox({ placeholder }: { placeholder: string }) {
       <Search aria-hidden="true" className="size-4" />
       <span>{placeholder}</span>
     </div>
+  );
+}
+
+function EmptyPanel({ text }: { text: string }) {
+  return (
+    <p className="rounded-lg border border-dashed border-[#d7c5ad] bg-[#fffaf2] p-4 text-sm font-semibold text-brand-brown dark:border-white/10 dark:bg-white/[0.04]">
+      {text}
+    </p>
   );
 }

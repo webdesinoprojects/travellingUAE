@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, DatabaseZap, Loader2, Pencil, Trash2 } from "lucide-react";
 
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-
 type AdminCrudPanelProps = {
   resource: string;
   firstRowId?: string;
@@ -45,7 +43,7 @@ const DELETE_ENABLED = new Set([
 ]);
 
 export function AdminCrudPanel({ resource, firstRowId }: AdminCrudPanelProps) {
-  const [accessToken, setAccessToken] = useState<string>();
+  const [hasSession, setHasSession] = useState(false);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [state, setState] = useState<CrudState>({
     status: "idle",
@@ -56,7 +54,7 @@ export function AdminCrudPanel({ resource, firstRowId }: AdminCrudPanelProps) {
   const canPatch = PATCH_ENABLED.has(resource) && Boolean(activeId);
   const canDelete = DELETE_ENABLED.has(resource) && Boolean(activeId);
   const isBusy = state.status === "loading";
-  const authReady = Boolean(accessToken);
+  const authReady = hasSession;
   const helperText = useMemo(() => {
     if (!sessionChecked) {
       return "Checking admin session...";
@@ -72,14 +70,18 @@ export function AdminCrudPanel({ resource, firstRowId }: AdminCrudPanelProps) {
   useEffect(() => {
     let mounted = true;
 
-    createSupabaseBrowserClient()
-      .auth.getSession()
-      .then(({ data }) => {
+    fetch("/api/admin/session", { method: "GET" })
+      .then((response) => {
         if (!mounted) {
           return;
         }
 
-        setAccessToken(data.session?.access_token);
+        setHasSession(response.ok);
+      })
+      .catch(() => {
+        if (mounted) {
+          setHasSession(false);
+        }
       })
       .finally(() => {
         if (mounted) {
@@ -93,7 +95,7 @@ export function AdminCrudPanel({ resource, firstRowId }: AdminCrudPanelProps) {
   }, []);
 
   async function runAction(action: "create" | "update" | "delete") {
-    if (!accessToken) {
+    if (!hasSession) {
       setState({
         status: "error",
         message: "Admin session is required for live writes.",
@@ -121,7 +123,6 @@ export function AdminCrudPanel({ resource, firstRowId }: AdminCrudPanelProps) {
       const response = await fetch(url, {
         method,
         headers: {
-          Authorization: `Bearer ${accessToken}`,
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,

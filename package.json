@@ -14,7 +14,9 @@
     "db:reset": "supabase db reset",
     "db:migration:new": "supabase migration new",
     "db:types": "supabase gen types typescript --local > src/types/supabase.ts",
-    "db:types:linked": "supabase gen types typescript --linked > src/types/supabase.ts"
+    "db:types:linked": "supabase gen types typescript --linked > src/types/supabase.ts",
+    "admin:bootstrap": "node scripts/bootstrap-admin.mjs",
+    "seed:home": "node scripts/seed-home-footer.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",

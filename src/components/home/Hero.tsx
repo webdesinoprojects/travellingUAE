@@ -1,10 +1,29 @@
 import Image from "next/image";
-import { heroTabs } from "@/data/travel";
+import Link from "next/link";
+import { primarySearchServices } from "@/data/travel";
 import { getTripDestinations } from "@/data/trips";
 import { HeroSearch } from "@/components/home/HeroSearch";
 import { TravelIcon } from "@/components/ui/TravelIcon";
+import type { PublicHeroMedia } from "@/types/home";
+import type { SearchServiceKey } from "@/types/travel";
 
-export async function Hero() {
+type HeroProps = {
+  copy: {
+    title: string;
+    description: string;
+    quickAccess: string;
+    stats: Array<{
+      value: string;
+      label: string;
+    }>;
+    serviceLabels: Partial<Record<SearchServiceKey, string>>;
+    moreLabel: string;
+  };
+  media: PublicHeroMedia;
+  initialService: SearchServiceKey;
+};
+
+export async function Hero({ copy, media, initialService }: HeroProps) {
   const destinations = await getTripDestinations();
   const destinationOptions = destinations.map(({ slug, name }) => ({
     slug,
@@ -12,59 +31,65 @@ export async function Hero() {
   }));
 
   return (
-    <section className="relative min-h-[760px] overflow-hidden bg-brand-navy text-white">
-      <Image
-        src="https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=2200&q=86"
-        alt="Road trip through a warm desert mountain route"
-        fill
-        preload
-        sizes="100vw"
-        className="object-cover"
-      />
-      <div className="hero-mask absolute inset-0" aria-hidden="true" />
-      <div
-        aria-hidden="true"
-        className="absolute inset-x-0 bottom-0 h-44 bg-linear-to-t from-background to-transparent"
-      />
+    <section className="relative min-h-[760px] bg-brand-navy text-white">
+      <div className="absolute inset-0 overflow-hidden">
+        <Image
+          src={media.backgroundImage}
+          alt={media.backgroundAlt}
+          fill
+          preload
+          sizes="100vw"
+          className="object-cover"
+        />
+        <div className="hero-mask absolute inset-0" aria-hidden="true" />
+        <div
+          aria-hidden="true"
+          className="absolute inset-x-0 bottom-0 h-44 bg-linear-to-t from-background to-transparent"
+        />
+      </div>
 
       <div className="relative z-10 mx-auto flex min-h-[760px] w-full max-w-[1240px] flex-col justify-end px-4 pb-10 pt-32 sm:px-6 lg:px-4">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_430px] lg:items-end">
           <div className="max-w-4xl">
-            
             <h1 className="mt-6 max-w-5xl font-serif text-[3.25rem] font-semibold leading-[0.98] text-white drop-shadow-sm sm:text-[4.8rem] lg:text-[5.7rem]">
-              Journeys built around your time.
+              {copy.title}
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-white/82 sm:text-xl">
-              Flights, stays, visas and holiday routes in one calm booking
-              experience for families, groups and frequent travelers.
+              {copy.description}
             </p>
 
-            <HeroSearch destinations={destinationOptions} />
+            <HeroSearch
+              key={initialService}
+              destinations={destinationOptions}
+              initialService={initialService}
+              moreLabel={copy.moreLabel}
+              serviceLabels={copy.serviceLabels}
+            />
           </div>
 
           <div className="glass-panel rounded-lg p-4">
             <p className="text-sm font-bold uppercase text-white/72">
-              Quick access
+              {copy.quickAccess}
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              {heroTabs.map((tab) => (
-                <a
-                  key={tab.label}
-                  href="#packages"
+              {primarySearchServices.map((tab) => (
+                <Link
+                  key={tab.service}
+                  href={`/?service=${tab.service}#travel-search`}
                   className="flex min-h-16 items-center gap-3 rounded-lg bg-white/12 px-4 text-sm font-bold text-white transition hover:bg-brand-sand/20"
                 >
                   <TravelIcon icon={tab.icon} className="size-5" />
-                  {tab.label}
-                </a>
+                  {copy.serviceLabels[tab.service] ?? tab.label}
+                </Link>
               ))}
             </div>
           </div>
         </div>
 
         <div className="mt-10 grid gap-3 border-t border-white/18 pt-5 text-white/86 sm:grid-cols-3">
-          <Stat value="18+" label="Destination lanes" />
-          <Stat value="24/7" label="Trip assistance" />
-          <Stat value="4-step" label="Booking journey" />
+          {copy.stats.map((stat) => (
+            <Stat key={stat.label} value={stat.value} label={stat.label} />
+          ))}
         </div>
       </div>
     </section>

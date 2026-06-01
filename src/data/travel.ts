@@ -9,23 +9,69 @@ import type {
 } from "@/types/travel";
 
 export const navItems: NavItem[] = [
-  { label: "Flights", href: "#flight" },
-  { label: "Visa Desk", href: "#visas", hasDropdown: true },
-  { label: "Holidays", href: "#packages", hasDropdown: true },
-  { label: "Wellness", href: "#wellness" },
-  { label: "Travel Desk", href: "#services", hasDropdown: true },
-  { label: "Hajj & Umrah", href: "#hajj" },
-  { label: "Journal", href: "#blogs" },
+  { label: "Flights", href: "/?service=flight#travel-search" },
+  {
+    label: "Visa Desk",
+    href: "/?service=visa#travel-search",
+    hasDropdown: true,
+    children: [
+      { label: "Gulf Visa", href: "/gulf-visa" },
+      { label: "Global Visa", href: "/global-visa" },
+    ],
+  },
+  {
+    label: "Holidays",
+    href: "/?service=packages#travel-search",
+    hasDropdown: true,
+    children: [
+      { label: "Holiday Packages", href: "/?service=packages#travel-search" },
+      {
+        label: "Customised Packages",
+        href: "/?service=customized-packages#travel-search",
+      },
+      { label: "Hajj & Umrah", href: "/hajj-umrah" },
+    ],
+  },
+  { label: "Wellness", href: "/?service=wellness#travel-search" },
+  {
+    label: "Travel Desk",
+    href: "/?service=transfers#travel-search",
+    hasDropdown: true,
+    children: [
+      { label: "Transfers", href: "/?service=transfers#travel-search" },
+      { label: "Car Rental", href: "/?service=car-rental#travel-search" },
+      { label: "Insurance", href: "/?service=insurance#travel-search" },
+      { label: "Assist Service", href: "/?service=assist-service#travel-search" },
+      { label: "E-SIM", href: "/?service=e-sim#travel-search" },
+    ],
+  },
+  { label: "Hajj & Umrah", href: "/hajj-umrah" },
+  { label: "Journal", href: "/journal" },
 ];
 
-export const heroTabs: HeroTab[] = [
-  { label: "Flights", icon: "flight" },
-  { label: "Hotel Stays", icon: "hotel" },
-  { label: "Holiday Routes", icon: "package" },
-  { label: "Wellness Stays", icon: "wellness" },
-  { label: "Cruise", icon: "cruise" },
-  { label: "Visa Desk", icon: "visa" },
+export const primarySearchServices: HeroTab[] = [
+  { label: "Flights", icon: "flight", service: "flight" },
+  { label: "Hotel", icon: "hotel", service: "hotel" },
+  { label: "Packages", icon: "package", service: "packages" },
+  { label: "Wellness", icon: "wellness", service: "wellness" },
+  { label: "Hajj & Umrah", icon: "hajj", service: "hajj-umrah" },
+  { label: "Visa", icon: "visa", service: "visa" },
 ];
+
+export const moreSearchServices: HeroTab[] = [
+  { label: "Transfers", icon: "transfer", service: "transfers" },
+  { label: "Car Rental", icon: "car", service: "car-rental" },
+  { label: "Insurance", icon: "insurance", service: "insurance" },
+  {
+    label: "Customised Packages",
+    icon: "package",
+    service: "customized-packages",
+  },
+  { label: "Assist Service", icon: "bus", service: "assist-service" },
+  { label: "E-SIM", icon: "sim", service: "e-sim" },
+];
+
+export const heroTabs: HeroTab[] = primarySearchServices;
 
 export const exclusives: ProductCard[] = [
   {
@@ -200,27 +246,34 @@ export const testimonials: Testimonial[] = [
 export const footerColumns: FooterColumn[] = [
   {
     title: "Company",
-    links: ["About Fly Time", "Work with us", "Contact desk"],
+    links: [
+      { label: "About Fly Time", href: "/about" },
+      { label: "Work with us", href: "/contact" },
+      { label: "Contact desk", href: "/contact" },
+    ],
   },
   {
     title: "Travel Desk",
     links: [
-      "India Tour Package",
-      "International Tour Package",
-      "Flight",
-      "Global Visa",
-      "Gulf Visa",
-      "Hajj & Umrah",
-      "Cruise",
-      "Hotel Booking",
-      "Bus & Train Tickets",
-      "Passport Services",
-      "Document Attestation",
-      "Travel Insurance",
+      { label: "India Tour Package", href: "/trips" },
+      { label: "International Tour Package", href: "/trips" },
+      { label: "Flight", href: "/?service=flight#travel-search" },
+      { label: "Global Visa", href: "/global-visa" },
+      { label: "Gulf Visa", href: "/gulf-visa" },
+      { label: "Hajj & Umrah", href: "/hajj-umrah" },
+      { label: "Cruise", href: "/?service=cruise#travel-search" },
+      { label: "Hotel Booking", href: "/?service=hotel#travel-search" },
+      { label: "Bus & Train Tickets", href: "/?service=transfers#travel-search" },
+      { label: "Passport Services", href: "/passport-services" },
+      { label: "Document Attestation", href: "/document-attestation" },
+      { label: "Travel Insurance", href: "/?service=insurance#travel-search" },
     ],
   },
   {
     title: "Legal",
-    links: ["Privacy Policy", "Terms & Conditions"],
+    links: [
+      { label: "Privacy Policy", href: "/privacy" },
+      { label: "Terms & Conditions", href: "/terms" },
+    ],
   },
 ];

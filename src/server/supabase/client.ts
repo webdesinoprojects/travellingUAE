@@ -29,6 +29,15 @@ export function getSupabasePublicServerClient() {
     return cachedPublicClient;
   }
 
+  cachedPublicClient = createConfiguredPublicClient("flytime-next-public-server");
+  return cachedPublicClient;
+}
+
+export function createSupabasePublicAuthClient() {
+  return createConfiguredPublicClient("flytime-next-admin-auth");
+}
+
+function createConfiguredPublicClient(clientInfo: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -36,18 +45,15 @@ export function getSupabasePublicServerClient() {
     throw new Error("Supabase public environment is not configured");
   }
 
-  cachedPublicClient = createClient(url, anonKey, {
+  return createClient(url, anonKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
     global: {
       headers: {
-        "X-Client-Info": "flytime-next-public-server",
+        "X-Client-Info": clientInfo,
       },
     },
   });
-
-  return cachedPublicClient;
 }
-

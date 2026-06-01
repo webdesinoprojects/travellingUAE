@@ -2,28 +2,50 @@ export type NavItem = {
   label: string;
   href: string;
   hasDropdown?: boolean;
+  children?: NavItem[];
 };
 
 export type TravelIconKey =
   | "flight"
   | "hotel"
   | "package"
+  | "hajj"
   | "wellness"
   | "cruise"
   | "visa"
   | "bus"
+  | "transfer"
+  | "car"
   | "passport"
   | "document"
-  | "insurance";
+  | "insurance"
+  | "sim";
+
+export type SearchServiceKey =
+  | "flight"
+  | "hotel"
+  | "packages"
+  | "hajj-umrah"
+  | "wellness"
+  | "visa"
+  | "transfers"
+  | "car-rental"
+  | "insurance"
+  | "cruise"
+  | "customized-packages"
+  | "assist-service"
+  | "e-sim";
 
 export type HeroTab = {
   label: string;
   icon: TravelIconKey;
+  service: SearchServiceKey;
 };
 
 export type ProductCard = {
   title: string;
   price: string;
+  summary?: string;
   image: string;
   alt: string;
   action: string;
@@ -42,6 +64,7 @@ export type BentoPackage = {
 
 export type ServiceTile = {
   title: string;
+  summary?: string;
   image: string;
   alt: string;
   icon: TravelIconKey;
@@ -54,9 +77,14 @@ export type Testimonial = {
   alt?: string;
 };
 
+export type FooterLink = {
+  label: string;
+  href: string;
+};
+
 export type FooterColumn = {
   title: string;
-  links: string[];
+  links: FooterLink[];
 };
 
 export type TripCategory = {
@@ -84,6 +112,10 @@ export type TripMapLocation = {
 export type TripItinerary = {
   title: string;
   paragraphs: string[];
+  days: Array<{
+    title: string;
+    description: string;
+  }>;
 };
 
 export type TripPackage = {

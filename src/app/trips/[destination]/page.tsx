@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { SiteFooter } from "@/components/layout/SiteFooter";
 import {
   TripList,
   type TripListInitialFilters,
@@ -59,14 +60,17 @@ export default async function DestinationTripsPage({
   );
 
   return (
-    <TripList
-      key={`${tripDestination.slug}-${stableFilterKey(initialFilters)}`}
-      destination={filteredTripDestination}
-      filterSource={tripDestination}
-      destinations={destinations}
-      displayDate={formatTripDisplayDate(new Date())}
-      initialFilters={initialFilters}
-    />
+    <>
+      <TripList
+        key={`${tripDestination.slug}-${stableFilterKey(initialFilters)}`}
+        destination={filteredTripDestination}
+        filterSource={tripDestination}
+        destinations={destinations}
+        displayDate={formatTripDisplayDate(new Date())}
+        initialFilters={initialFilters}
+      />
+      <SiteFooter />
+    </>
   );
 }
 

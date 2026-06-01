@@ -3,6 +3,12 @@ import { revalidatePath } from "next/cache";
 
 import { isAdminResource } from "@/server/admin/dal";
 import {
+  revalidateCmsPageSurfaces,
+  revalidateNavigationSurfaces,
+  revalidateTranslationSurfaces,
+  revalidateTripSurfaces,
+} from "@/server/admin/revalidation";
+import {
   deleteAdminResource,
   getCrudDefinition,
   updateAdminResource,
@@ -83,6 +89,18 @@ function revalidateAdminResource(resource: string) {
   revalidatePath(`/admin/${resource}`);
 
   if (resource === "destinations" || resource === "trips") {
-    revalidatePath("/trips");
+    revalidateTripSurfaces();
+  }
+
+  if (resource === "navigation") {
+    revalidateNavigationSurfaces();
+  }
+
+  if (resource === "pages") {
+    revalidateCmsPageSurfaces();
+  }
+
+  if (resource === "translations") {
+    revalidateTranslationSurfaces();
   }
 }

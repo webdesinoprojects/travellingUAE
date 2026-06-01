@@ -2,6 +2,12 @@ import type { NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getAdminResourceDTO, isAdminResource } from "@/server/admin/dal";
+import {
+  revalidateCmsPageSurfaces,
+  revalidateNavigationSurfaces,
+  revalidateTranslationSurfaces,
+  revalidateTripSurfaces,
+} from "@/server/admin/revalidation";
 import { jsonError, jsonOk, logServerError } from "@/server/http/response";
 import { verifyAdminApiAccess } from "@/server/supabase/auth";
 import {
@@ -30,7 +36,17 @@ export async function GET(
       return jsonError(access.status, "You are not allowed to access this area.");
     }
 
-    return jsonOk(await getAdminResourceDTO(resource));
+    const url = new URL(request.url);
+    const params = {
+      q: url.searchParams.get("q") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+      cursor: url.searchParams.get("cursor") ?? undefined,
+      limit: url.searchParams.has("limit")
+        ? Number(url.searchParams.get("limit"))
+        : undefined,
+    };
+
+    return jsonOk(await getAdminResourceDTO(resource, params));
   } catch (error) {
     logServerError("api.admin.resource", error);
     return jsonError(500);
@@ -76,6 +92,18 @@ function revalidateAdminResource(resource: string) {
   revalidatePath(`/admin/${resource}`);
 
   if (resource === "destinations" || resource === "trips") {
-    revalidatePath("/trips");
+    revalidateTripSurfaces();
+  }
+
+  if (resource === "navigation") {
+    revalidateNavigationSurfaces();
+  }
+
+  if (resource === "pages") {
+    revalidateCmsPageSurfaces();
+  }
+
+  if (resource === "translations") {
+    revalidateTranslationSurfaces();
   }
 }

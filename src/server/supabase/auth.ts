@@ -2,10 +2,11 @@ import "server-only";
 
 import type { NextRequest } from "next/server";
 
+import { ADMIN_SESSION_COOKIE } from "@/lib/admin/session";
 import { logServerError } from "@/server/http/response";
 import {
+  createSupabasePublicAuthClient,
   getSupabaseAdminClient,
-  getSupabasePublicServerClient,
   hasSupabaseAdminEnv,
   hasSupabasePublicEnv,
 } from "@/server/supabase/client";
@@ -24,7 +25,17 @@ export type AdminAccess =
   | { ok: true; actor: AdminActor }
   | { ok: false; status: 401 | 403 };
 
-export const ADMIN_SESSION_COOKIE = "flytime-admin-access";
+export { ADMIN_SESSION_COOKIE };
+
+export type RefreshedAdminSession =
+  | {
+      ok: true;
+      actor: AdminActor;
+      accessToken: string;
+      refreshToken: string;
+      expiresIn: number;
+    }
+  | { ok: false; status: 401 | 403 };
 
 export async function verifyAdminApiAccess(
   request: NextRequest,
@@ -65,7 +76,7 @@ export async function verifyAdminAccessToken(
   }
 
   try {
-    const publicClient = getSupabasePublicServerClient();
+    const publicClient = createSupabasePublicAuthClient();
     const userResult = await publicClient.auth.getUser(accessToken);
     const user = userResult.data.user;
 
@@ -114,6 +125,50 @@ export async function verifyAdminAccessToken(
   } catch (error) {
     logServerError("admin.auth", error);
     return { ok: false, status: 403 };
+  }
+}
+
+export async function refreshAdminAccessSession(
+  refreshToken: string,
+  requiredRole: AdminRole = "editor",
+): Promise<RefreshedAdminSession> {
+  if (!hasSupabasePublicEnv() || !hasSupabaseAdminEnv()) {
+    return { ok: false, status: 403 };
+  }
+
+  try {
+    const result = await createSupabasePublicAuthClient().auth.refreshSession({
+      refresh_token: refreshToken,
+    });
+    const session = result.data.session;
+
+    if (
+      result.error ||
+      !session?.access_token ||
+      !session.refresh_token
+    ) {
+      return { ok: false, status: 401 };
+    }
+
+    const access = await verifyAdminAccessToken(
+      session.access_token,
+      requiredRole,
+    );
+
+    if (!access.ok) {
+      return access;
+    }
+
+    return {
+      ok: true,
+      actor: access.actor,
+      accessToken: session.access_token,
+      refreshToken: session.refresh_token,
+      expiresIn: session.expires_in ?? 60 * 60,
+    };
+  } catch (error) {
+    logServerError("admin.auth.refresh", error);
+    return { ok: false, status: 401 };
   }
 }
 

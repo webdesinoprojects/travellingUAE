@@ -23,7 +23,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { SiteFooter } from "@/components/layout/SiteFooter";
 import type { TripDestination, TripPackage } from "@/types/travel";
 
 type SortKey = "recommended" | "cheapest" | "duration";
@@ -451,7 +450,6 @@ export function TripList({
         trip={selectedTrip}
         onClose={() => setSelectedTrip(null)}
       />
-      <SiteFooter />
     </>
   );
 }

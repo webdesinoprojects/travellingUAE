@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
+import { SiteFooter } from "@/components/layout/SiteFooter";
 import { TripList } from "@/components/trips/TripList";
 import { formatTripDisplayDate } from "@/lib/date";
 import { getPublicTripDestinations } from "@/server/public/dal";
@@ -21,11 +22,14 @@ export default async function TripsPage() {
   }
 
   return (
-    <TripList
-      key={destination.slug}
-      destination={destination}
-      destinations={destinations}
-      displayDate={formatTripDisplayDate(new Date())}
-    />
+    <>
+      <TripList
+        key={destination.slug}
+        destination={destination}
+        destinations={destinations}
+        displayDate={formatTripDisplayDate(new Date())}
+      />
+      <SiteFooter />
+    </>
   );
 }

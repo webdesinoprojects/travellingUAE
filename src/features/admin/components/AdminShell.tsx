@@ -2,14 +2,50 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, LogOut, Menu, PanelLeftClose, Search, X } from "lucide-react";
-import type { CSSProperties } from "react";
+import {
+  Bell,
+  BookOpenText,
+  FileText,
+  GalleryHorizontalEnd,
+  Home,
+  Inbox,
+  Languages,
+  LayoutDashboard,
+  LogOut,
+  MapPin,
+  Menu,
+  Navigation,
+  PanelLeftClose,
+  Plane,
+  Search,
+  Settings,
+  ShieldCheck,
+  Tags,
+  UserRoundCog,
+  X,
+} from "lucide-react";
+import type { CSSProperties, FormEvent } from "react";
 import { useState } from "react";
 
-import { adminNavItems } from "@/features/admin/mock/admin-data";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+
+const NAV_ITEMS = [
+  { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  { label: "Bookings", href: "/admin/bookings", icon: Inbox },
+  { label: "Destinations", href: "/admin/destinations", icon: MapPin },
+  { label: "Trips", href: "/admin/trips", icon: Plane },
+  { label: "Categories", href: "/admin/categories", icon: Tags },
+  { label: "Media", href: "/admin/media", icon: GalleryHorizontalEnd },
+  { label: "Home CMS", href: "/admin/home", icon: Home },
+  { label: "Pages", href: "/admin/pages", icon: FileText },
+  { label: "Navigation", href: "/admin/navigation", icon: Navigation },
+  { label: "Translations", href: "/admin/translations", icon: Languages },
+  { label: "Newsletter", href: "/admin/newsletter", icon: BookOpenText },
+  { label: "Users", href: "/admin/users", icon: UserRoundCog },
+  { label: "Settings", href: "/admin/settings", icon: Settings },
+  { label: "Audit Log", href: "/admin/audit-log", icon: ShieldCheck },
+];
 
 type AdminShellProps = {
   children: React.ReactNode;
@@ -76,6 +112,25 @@ export function AdminShell({ children }: AdminShellProps) {
 }
 
 function AdminTopbar({ onMenu }: { onMenu: () => void }) {
+  const pathname = usePathname();
+  const router = useRouter();
+
+  function handleSearch(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const q = (
+      e.currentTarget.elements.namedItem("q") as HTMLInputElement
+    ).value.trim();
+
+    if (!q) {
+      return;
+    }
+
+    const resourceMatch = pathname.match(/^\/admin\/([^/]+)$/);
+    const target = resourceMatch ? resourceMatch[1] : "bookings";
+
+    router.push(`/admin/${target}?q=${encodeURIComponent(q)}`);
+  }
+
   return (
     <header className="sticky top-0 z-40 border-b border-[#d7c5ad]/80 bg-[#fffaf2]/80 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-black/78 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-[1580px] items-center justify-between gap-4">
@@ -98,10 +153,24 @@ function AdminTopbar({ onMenu }: { onMenu: () => void }) {
           </div>
         </div>
 
-        <div className="hidden min-w-[280px] items-center gap-3 rounded-lg border border-border-soft bg-white px-4 py-3 text-sm text-brand-brown shadow-sm lg:flex dark:bg-white/10">
-          <Search aria-hidden="true" className="size-4 shrink-0" />
-          <span>Search bookings, trips, pages</span>
-        </div>
+        <form
+          role="search"
+          onSubmit={handleSearch}
+          className="hidden min-w-[280px] items-center gap-3 rounded-lg border border-border-soft bg-white px-4 py-3 shadow-sm lg:flex dark:bg-white/10"
+        >
+          <Search aria-hidden="true" className="size-4 shrink-0 text-brand-brown" />
+          <input
+            type="search"
+            name="q"
+            placeholder="Search bookings, trips, pages"
+            aria-label="Search admin records"
+            autoComplete="off"
+            className="flex-1 bg-transparent text-sm text-brand-navy outline-none placeholder:text-brand-brown dark:text-white"
+          />
+          <button type="submit" className="sr-only">
+            Search
+          </button>
+        </form>
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
@@ -145,7 +214,6 @@ function AdminSidebar({
   const router = useRouter();
 
   async function handleSignOut() {
-    await createSupabaseBrowserClient().auth.signOut().catch(() => null);
     await fetch("/api/admin/session", { method: "DELETE" }).catch(() => null);
     router.replace("/admin/login");
     router.refresh();
@@ -178,7 +246,7 @@ function AdminSidebar({
           <div className="flex items-center gap-2">
             {!isCollapsed ? (
               <span className="rounded-lg border border-border-soft bg-[#e8f7ff] px-2.5 py-1 text-xs font-black text-brand-blue dark:bg-white/10 dark:text-brand-sand">
-              Mock
+                Ops
               </span>
             ) : null}
             <button
@@ -202,7 +270,7 @@ function AdminSidebar({
 
       <nav className="no-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" aria-label="Admin navigation">
         <div className="grid gap-1.5">
-          {adminNavItems.map((item) => {
+          {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive =
               pathname === item.href ||
@@ -226,18 +294,6 @@ function AdminSidebar({
                 <span className={isCollapsed ? "sr-only" : "min-w-0 flex-1 truncate"}>
                   {item.label}
                 </span>
-                {item.badge && !isCollapsed ? (
-                  <span
-                    className={[
-                      "rounded-full px-2 py-0.5 text-[11px]",
-                      isActive
-                        ? "bg-white/15 text-white dark:bg-brand-navy/15 dark:text-brand-navy"
-                        : "bg-[#e8f7ff] text-brand-blue dark:bg-white/10 dark:text-brand-sand",
-                    ].join(" ")}
-                  >
-                    {item.badge}
-                  </span>
-                ) : null}
               </Link>
             );
           })}

@@ -4,11 +4,17 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
-import { exclusives } from "@/data/travel";
+import type { PublicHomeSectionCopy } from "@/types/home";
+import type { ProductCard } from "@/types/travel";
 
 const CARD_GAP = 16;
 
-export function SmartExclusives() {
+type SmartExclusivesProps = {
+  items: ProductCard[];
+  section: PublicHomeSectionCopy;
+};
+
+export function SmartExclusives({ items, section }: SmartExclusivesProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   function scrollByCard(direction: 1 | -1) {
@@ -57,15 +63,14 @@ export function SmartExclusives() {
           <div className="flex flex-col justify-between gap-5 border-b border-border-soft pb-6 md:flex-row md:items-end">
             <div>
               <p className="text-sm font-extrabold uppercase text-brand-red">
-                Handpicked Deals
+                {section.eyebrow}
               </p>
               <h2 className="mt-2 font-serif text-4xl leading-[1.05] text-slate-950 dark:text-white sm:text-5xl">
-                Fly Time Picks
+                {section.title}
               </h2>
             </div>
             <p className="max-w-xl text-sm leading-6 text-brand-blue/80 dark:text-brand-sky sm:text-base">
-              Seasonal offers with clear pricing, simple actions, and fast
-              paths into package details.
+              {section.description}
             </p>
           </div>
 
@@ -90,7 +95,7 @@ export function SmartExclusives() {
             ref={scrollerRef}
             className="no-scrollbar mt-8 flex gap-4 overflow-x-auto scroll-smooth pb-2"
           >
-            {exclusives.map((item) => (
+            {items.map((item) => (
               <article
                 key={item.title}
                 data-exclusive
@@ -119,9 +124,11 @@ export function SmartExclusives() {
                     <h3 className="text-[1.08rem] font-extrabold leading-tight text-slate-950 dark:text-white">
                       {item.title}
                     </h3>
-                    <p className="mt-3 text-sm leading-6 text-brand-blue/78 dark:text-brand-sky">
-                      A clear next step for fares, stays, and holiday routes.
-                    </p>
+                    {item.summary ? (
+                      <p className="mt-3 text-sm leading-6 text-brand-blue/78 dark:text-brand-sky">
+                        {item.summary}
+                      </p>
+                    ) : null}
                   </div>
                   <span
                     className="self-end whitespace-nowrap rounded-lg bg-brand-blue px-3.5 py-2 text-xs font-extrabold text-white transition group-hover:bg-brand-navy dark:bg-brand-sand dark:text-brand-navy"

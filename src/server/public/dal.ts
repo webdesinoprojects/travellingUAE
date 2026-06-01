@@ -160,7 +160,30 @@ async function fetchTripDestinationsFromSupabase() {
         .order("sort_order", { ascending: true }),
       supabase
         .from("published_trip_cards")
-        .select("*")
+        .select(
+          [
+            "id",
+            "destination_id",
+            "destination_slug",
+            "destination_name",
+            "slug",
+            "title",
+            "city",
+            "summary",
+            "badge",
+            "duration_days",
+            "duration_label",
+            "has_flights",
+            "hotel_star",
+            "price_amount",
+            "currency",
+            "start_date",
+            "card_image_url",
+            "card_image_alt",
+            "categories",
+            "tags",
+          ].join(","),
+        )
         .order("sort_order", { ascending: true }),
     ]);
 
@@ -283,14 +306,18 @@ async function fetchTripPackageFromSupabase(
       galleryResult,
       itineraryResult,
     ] = await Promise.all([
-      selectTripRows<FeatureRow>("trip_features", tripId),
-      selectTripRows<OrderedTextRow>("trip_bullets", tripId),
-      selectTripRows<OrderedTextRow>("trip_highlights", tripId),
-      selectTripRows<OrderedTextRow>("trip_inclusions", tripId),
-      selectTripRows<OrderedTextRow>("trip_exclusions", tripId),
-      selectTripRows<OrderedTextRow>("trip_terms", tripId),
-      selectTripRows<GalleryRow>("trip_gallery", tripId),
-      selectTripRows<ItineraryRow>("trip_itinerary_items", tripId),
+      selectTripRows<FeatureRow>("trip_features", "label,icon,sort_order", tripId),
+      selectTripRows<OrderedTextRow>("trip_bullets", "body,sort_order", tripId),
+      selectTripRows<OrderedTextRow>("trip_highlights", "body,sort_order", tripId),
+      selectTripRows<OrderedTextRow>("trip_inclusions", "body,sort_order", tripId),
+      selectTripRows<OrderedTextRow>("trip_exclusions", "body,sort_order", tripId),
+      selectTripRows<OrderedTextRow>("trip_terms", "body,sort_order", tripId),
+      selectTripRows<GalleryRow>("trip_gallery", "src,alt_text,sort_order", tripId),
+      selectTripRows<ItineraryRow>(
+        "trip_itinerary_items",
+        "title,body,location_label,latitude,longitude,zoom,sort_order",
+        tripId,
+      ),
     ]);
 
     const basePackage = destination.packages.find(
@@ -316,11 +343,15 @@ async function fetchTripPackageFromSupabase(
   }
 }
 
-async function selectTripRows<T>(table: string, tripId: string) {
+async function selectTripRows<T>(
+  table: string,
+  columns: string,
+  tripId: string,
+) {
   const supabase = getSupabasePublicServerClient();
   const result = await supabase
     .from(table)
-    .select("*")
+    .select(columns)
     .eq("trip_id", tripId)
     .order("sort_order", { ascending: true });
 
@@ -548,6 +579,10 @@ function mapItineraryRows(rows: ItineraryRow[]): TripItinerary | undefined {
   return {
     title: rows[0]?.title ?? "Itinerary",
     paragraphs: rows.map((row) => row.body),
+    days: rows.map((row) => ({
+      title: row.title,
+      description: row.body,
+    })),
   };
 }
 
