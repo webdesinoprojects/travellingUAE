@@ -20,6 +20,11 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "ik.imagekit.io",
       },
+      {
+        // RateHawk / ETG static hotel content images (live hotel options).
+        protocol: "https",
+        hostname: "cdn.worldota.net",
+      },
     ],
   },
 };

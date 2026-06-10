@@ -80,6 +80,8 @@ export type HotelOptionDTO = {
   location?: ItineraryPoint;
   priceDelta: MoneyDelta;
   isDefault: boolean;
+  /** True when this option is a live provider (RateHawk) quote. */
+  isLive?: boolean;
 };
 
 export type TransferOptionDTO = {

@@ -613,7 +613,15 @@ function HotelOptionView({
         icon={Hotel}
       />
       <div className="min-w-0">
-        <h4 className="text-lg font-extrabold">{option.hotelName}</h4>
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="text-lg font-extrabold">{option.hotelName}</h4>
+          {option.isLive ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-green/12 px-2 py-0.5 text-[11px] font-black uppercase tracking-[0.12em] text-brand-green dark:bg-brand-sand/15 dark:text-brand-sand">
+              <span className="size-1.5 rounded-full bg-brand-green dark:bg-brand-sand" />
+              Live rates
+            </span>
+          ) : null}
+        </div>
         <MetaRow
           items={[
             option.address,

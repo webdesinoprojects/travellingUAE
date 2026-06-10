@@ -8,10 +8,17 @@ import {
   readNumber,
   readString,
 } from "@/server/http/validation";
+import { logServerError } from "@/server/http/response";
 import {
   getSupabaseAdminClient,
   getSupabasePublicServerClient,
 } from "@/server/supabase/client";
+import { isRateHawkConfigured } from "@/server/providers/ratehawk/config";
+import {
+  buildLiveHotelQuotes,
+  buildRequestHash,
+  type LiveHotelSearchInput,
+} from "@/server/providers/ratehawk/hotel-options";
 import type {
   ActivityOptionDTO,
   FlightOptionDTO,
@@ -27,6 +34,22 @@ import type {
 
 const SESSION_COOKIE = "flytime_option_session";
 const SESSION_TTL_SECONDS = 45 * 60;
+
+// RateHawk live hotel options (HP-2).
+const RATEHAWK_PROVIDER_SLUG = "ratehawk-hotel";
+const LIVE_OPTION_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_LIVE_RESIDENCY = "ae";
+const DEFAULT_LIVE_NIGHTS = 2;
+const LIVE_OPTION_LIMIT = 12;
+
+type HotelSourceMode = "manual" | "live" | "hybrid";
+
+type HotelSourceConfig = {
+  mode: HotelSourceMode;
+  regionId: number | null;
+  nights: number | null;
+  residency: string | null;
+};
 
 type SelectionCookieStore = {
   get(name: string): { value: string } | undefined;
@@ -63,6 +86,7 @@ type SegmentRow = {
   map_zoom: number;
   is_required: boolean;
   is_changeable: boolean;
+  metadata: Record<string, unknown> | null;
 };
 
 type FlightRow = {
@@ -208,8 +232,8 @@ export async function getSegmentOptionsDTO({
   }
 
   const options = await getOptionsByType({
-    tripId: context.tripId,
-    segmentId,
+    context,
+    segment,
     optionType,
     searchParams,
   });
@@ -271,11 +295,18 @@ export async function selectSegmentOption({
     return null;
   }
 
-  const option = await getAdminOption(optionType, context.tripId, segmentId, optionId);
+  const adminOption = await getAdminOption(
+    optionType,
+    context.tripId,
+    segmentId,
+    optionId,
+  );
 
-  if (!option) {
+  if (!adminOption) {
     return null;
   }
+
+  const { option, quoteSnapshotId } = adminOption;
 
   const existingToken = cookieStore.get(SESSION_COOKIE)?.value;
   const sessionToken = existingToken || randomBytes(32).toString("base64url");
@@ -314,6 +345,7 @@ export async function selectSegmentOption({
     optionType,
     optionId,
     option,
+    quoteSnapshotId,
   });
   const selectionResult = await supabase
     .from("trip_option_selections")
@@ -494,6 +526,49 @@ async function getDefaultOptions(
 }
 
 async function getOptionsByType({
+  context,
+  segment,
+  optionType,
+  searchParams,
+}: {
+  context: TripContext;
+  segment: SegmentRow;
+  optionType: ItineraryOptionType;
+  searchParams: URLSearchParams;
+}): Promise<SegmentOptionDTO[]> {
+  const tripId = context.tripId;
+  const segmentId = segment.id;
+
+  // Hotels can be served from manual DB rows, live RateHawk rates, or a hybrid
+  // of both. Resolve the mode up-front so a live-only segment skips the manual
+  // query entirely.
+  const hotelConfig =
+    optionType === "hotel" ? readHotelSourceConfig(segment) : null;
+  const includeManual = !hotelConfig || hotelConfig.mode !== "live";
+
+  const manualOptions = includeManual
+    ? await runManualOptionQuery({ tripId, segmentId, optionType, searchParams })
+    : [];
+
+  if (!hotelConfig || hotelConfig.mode === "manual") {
+    return manualOptions;
+  }
+
+  const liveOptions = await getLiveHotelOptions(
+    context,
+    segment,
+    hotelConfig,
+    searchParams,
+  );
+
+  if (hotelConfig.mode === "live") {
+    return liveOptions;
+  }
+
+  return sortHotelOptions([...manualOptions, ...liveOptions], searchParams);
+}
+
+async function runManualOptionQuery({
   tripId,
   segmentId,
   optionType,
@@ -503,7 +578,7 @@ async function getOptionsByType({
   segmentId: string;
   optionType: ItineraryOptionType;
   searchParams: URLSearchParams;
-}) {
+}): Promise<SegmentOptionDTO[]> {
   const supabase = getSupabasePublicServerClient();
   const table = getOptionTable(optionType);
   let query = supabase
@@ -539,6 +614,10 @@ async function getOptionsByType({
   } else if (optionType === "hotel") {
     const q = searchParams.get("q");
     const stars = searchParams.get("stars");
+
+    // Manual options only: live RateHawk rows carry a provider_id and are
+    // served separately by getLiveHotelOptions.
+    query = query.is("provider_id", null);
 
     if (q) {
       query = query.ilike("hotel_name", `%${q}%`);
@@ -599,13 +678,344 @@ async function getOptionsByType({
   );
 }
 
+let cachedRateHawkProviderId: string | null = null;
+
+function readHotelSourceConfig(segment: SegmentRow): HotelSourceConfig {
+  const metadata = isPlainRecord(segment.metadata) ? segment.metadata : {};
+  const rawMode =
+    typeof metadata.hotel_source === "string"
+      ? metadata.hotel_source.toLowerCase()
+      : "manual";
+  const mode: HotelSourceMode =
+    rawMode === "live" || rawMode === "hybrid" ? rawMode : "manual";
+
+  const ratehawk = isPlainRecord(metadata.ratehawk) ? metadata.ratehawk : {};
+  const residencyRaw = ratehawk.residency;
+
+  return {
+    mode,
+    regionId: toPositiveInt(ratehawk.region_id),
+    nights: toPositiveInt(ratehawk.nights),
+    residency:
+      typeof residencyRaw === "string" && /^[a-z]{2}$/i.test(residencyRaw)
+        ? residencyRaw.toLowerCase()
+        : null,
+  };
+}
+
+function deriveStayDates(context: TripContext, config: HotelSourceConfig) {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  let checkin = new Date(today.getTime() + 30 * 86_400_000);
+
+  if (context.startDate) {
+    const start = new Date(`${context.startDate}T00:00:00Z`);
+
+    if (!Number.isNaN(start.getTime()) && start.getTime() >= today.getTime()) {
+      checkin = start;
+    }
+  }
+
+  const nights = Math.min(Math.max(config.nights ?? DEFAULT_LIVE_NIGHTS, 1), 30);
+  const checkout = new Date(checkin.getTime() + nights * 86_400_000);
+
+  return {
+    checkin: checkin.toISOString().slice(0, 10),
+    checkout: checkout.toISOString().slice(0, 10),
+    nights,
+  };
+}
+
+function parseLiveGuests(searchParams: URLSearchParams) {
+  const adultsRaw = Number.parseInt(searchParams.get("adults") ?? "2", 10);
+  const adults =
+    Number.isInteger(adultsRaw) && adultsRaw >= 1 && adultsRaw <= 6
+      ? adultsRaw
+      : 2;
+  const children = (searchParams.get("children") ?? "")
+    .split(",")
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((age) => Number.isInteger(age) && age >= 0 && age <= 17)
+    .slice(0, 4);
+
+  return [{ adults, children }];
+}
+
+async function getOrCreateRateHawkProviderId(): Promise<string | null> {
+  if (cachedRateHawkProviderId) {
+    return cachedRateHawkProviderId;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const existing = await supabase
+    .from("external_providers")
+    .select("id")
+    .eq("slug", RATEHAWK_PROVIDER_SLUG)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw existing.error;
+  }
+
+  if (existing.data) {
+    cachedRateHawkProviderId = (existing.data as { id: string }).id;
+    return cachedRateHawkProviderId;
+  }
+
+  const inserted = await supabase
+    .from("external_providers")
+    .insert({
+      slug: RATEHAWK_PROVIDER_SLUG,
+      name: "RateHawk",
+      service_type: "hotel",
+      is_active: true,
+      metadata: {},
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (inserted.error) {
+    throw inserted.error;
+  }
+
+  cachedRateHawkProviderId = inserted.data
+    ? (inserted.data as { id: string }).id
+    : null;
+
+  return cachedRateHawkProviderId;
+}
+
+/**
+ * Live RateHawk hotel options for a segment. Returns sanitized HotelOptionDTOs
+ * persisted as selectable trip_hotel_options rows (with quote snapshots) so the
+ * existing selection/booking flow works unchanged. Never throws to the caller:
+ * a provider failure degrades to manual/empty so the page keeps working.
+ */
+async function getLiveHotelOptions(
+  context: TripContext,
+  segment: SegmentRow,
+  config: HotelSourceConfig,
+  searchParams: URLSearchParams,
+): Promise<SegmentOptionDTO[]> {
+  if (!config.regionId || !isRateHawkConfigured()) {
+    return [];
+  }
+
+  try {
+    const { checkin, checkout, nights } = deriveStayDates(context, config);
+    const searchInput: LiveHotelSearchInput = {
+      regionId: config.regionId,
+      checkin,
+      checkout,
+      residency: config.residency ?? DEFAULT_LIVE_RESIDENCY,
+      guests: parseLiveGuests(searchParams),
+      currency: context.currency,
+      language: "en",
+      limit: LIVE_OPTION_LIMIT,
+    };
+
+    const requestHash = buildRequestHash(searchInput);
+    const providerId = await getOrCreateRateHawkProviderId();
+
+    if (!providerId) {
+      return [];
+    }
+
+    const admin = getSupabaseAdminClient();
+    const nowIso = new Date().toISOString();
+
+    // Reuse persisted, unexpired rows for the exact same search.
+    const reuse = await admin
+      .from("trip_hotel_options")
+      .select(getOptionColumns("hotel"))
+      .eq("segment_id", segment.id)
+      .eq("provider_id", providerId)
+      .eq("status", "available")
+      .eq("metadata->>request_hash", requestHash)
+      .gt("expires_at", nowIso)
+      .order("price_delta_amount", { ascending: true })
+      .limit(LIVE_OPTION_LIMIT);
+
+    if (reuse.error) {
+      throw reuse.error;
+    }
+
+    const reuseRows = (reuse.data ?? []) as unknown as Array<
+      Record<string, unknown>
+    >;
+
+    if (reuseRows.length > 0) {
+      return reuseRows.map(mapLiveHotelRow);
+    }
+
+    const quotes = await buildLiveHotelQuotes(searchInput);
+
+    if (quotes.length === 0) {
+      return [];
+    }
+
+    // Expire previous live rows for this segment so stale quotes are neither
+    // displayed nor selectable.
+    const expirePrevious = await admin
+      .from("trip_hotel_options")
+      .update({ status: "expired" })
+      .eq("segment_id", segment.id)
+      .eq("provider_id", providerId)
+      .eq("status", "available");
+
+    if (expirePrevious.error) {
+      throw expirePrevious.error;
+    }
+
+    const expiresAt = new Date(Date.now() + LIVE_OPTION_TTL_MS).toISOString();
+
+    const snapshots = await admin
+      .from("provider_quote_snapshots")
+      .insert(
+        quotes.map((quote) => ({
+          provider_id: providerId,
+          service_type: "hotel",
+          request_hash: requestHash,
+          provider_reference: quote.hotelId,
+          currency: quote.currency,
+          price_amount: quote.priceAmount,
+          price_delta_amount: quote.priceAmount,
+          expires_at: expiresAt,
+          status: "available",
+          safe_payload: {
+            hid: quote.hid,
+            room_name: quote.roomName,
+            board_basis: quote.boardBasis ?? null,
+          },
+          // Server-only hashes for HP-3 prebook; never exposed in any DTO.
+          metadata: {
+            search_hash: quote.searchHash,
+            match_hash: quote.matchHash,
+          },
+        })),
+      )
+      .select("id,provider_reference");
+
+    if (snapshots.error) {
+      throw snapshots.error;
+    }
+
+    const snapshotByReference = new Map<string, string>();
+
+    for (const row of (snapshots.data ?? []) as Array<{
+      id: string;
+      provider_reference: string;
+    }>) {
+      snapshotByReference.set(row.provider_reference, row.id);
+    }
+
+    const inserted = await admin
+      .from("trip_hotel_options")
+      .insert(
+        quotes.map((quote) => ({
+          trip_id: context.tripId,
+          segment_id: segment.id,
+          provider_id: providerId,
+          quote_snapshot_id: snapshotByReference.get(quote.hotelId) ?? null,
+          hotel_name: quote.name,
+          address: quote.address,
+          star_rating: clampStarRating(quote.starRating),
+          room_name: quote.roomName,
+          board_basis: quote.boardBasis ?? null,
+          check_in_day_offset: 0,
+          check_out_day_offset: nights,
+          nights,
+          latitude: quote.latitude,
+          longitude: quote.longitude,
+          image_url: quote.imageUrl,
+          price_delta_amount: quote.priceAmount,
+          currency: quote.currency,
+          is_default: false,
+          status: "available",
+          expires_at: expiresAt,
+          metadata: {
+            request_hash: requestHash,
+            source: "ratehawk",
+            hid: quote.hid,
+          },
+        })),
+      )
+      .select(getOptionColumns("hotel"));
+
+    if (inserted.error) {
+      throw inserted.error;
+    }
+
+    return ((inserted.data ?? []) as unknown as Array<
+      Record<string, unknown>
+    >).map(mapLiveHotelRow);
+  } catch (error) {
+    logServerError("itinerary.hotel.live", error);
+    return [];
+  }
+}
+
+function mapLiveHotelRow(row: Record<string, unknown>): SegmentOptionDTO {
+  const dto = mapOption("hotel", row) as HotelOptionDTO;
+  return { ...dto, isLive: true };
+}
+
+function sortHotelOptions(
+  options: SegmentOptionDTO[],
+  searchParams: URLSearchParams,
+): SegmentOptionDTO[] {
+  const sort = searchParams.get("sort") ?? "price";
+  const sorted = [...options];
+
+  if (sort === "rating") {
+    sorted.sort((a, b) => hotelRatingValue(b) - hotelRatingValue(a));
+  } else {
+    sorted.sort((a, b) => a.priceDelta.amount - b.priceDelta.amount);
+  }
+
+  return sorted;
+}
+
+function hotelRatingValue(option: SegmentOptionDTO): number {
+  if (option.type !== "hotel") {
+    return 0;
+  }
+
+  return option.guestRating ?? option.starRating ?? 0;
+}
+
+function clampStarRating(value: number | null): number | null {
+  if (value == null || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(5, value));
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toPositiveInt(value: unknown): number | null {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
 async function getAdminOption(
   optionType: ItineraryOptionType,
   tripId: string,
   segmentId: string,
   optionId: string,
-) {
+): Promise<{ option: SegmentOptionDTO; quoteSnapshotId: string | null } | null> {
   const supabase = getSupabaseAdminClient();
+  const nowIso = new Date().toISOString();
   const result = await supabase
     .from(getOptionTable(optionType))
     .select(getOptionColumns(optionType))
@@ -613,6 +1023,8 @@ async function getAdminOption(
     .eq("segment_id", segmentId)
     .eq("id", optionId)
     .eq("status", "available")
+    // Expired provider quotes must never be selectable.
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
     .maybeSingle();
 
   if (result.error) {
@@ -623,7 +1035,11 @@ async function getAdminOption(
     return null;
   }
 
-  return mapOption(optionType, result.data as unknown as Record<string, unknown>);
+  const row = result.data as unknown as Record<string, unknown>;
+  const quoteSnapshotId =
+    typeof row.quote_snapshot_id === "string" ? row.quote_snapshot_id : null;
+
+  return { option: mapOption(optionType, row), quoteSnapshotId };
 }
 
 function mapSegment(row: SegmentRow): ItinerarySegmentDTO {
@@ -778,13 +1194,18 @@ function buildSelectionPayload({
   optionType,
   optionId,
   option,
+  quoteSnapshotId,
 }: {
   sessionId: string;
   segmentId: string;
   optionType: ItineraryOptionType;
   optionId: string;
   option: SegmentOptionDTO;
+  quoteSnapshotId: string | null;
 }) {
+  const isLiveHotel =
+    option.type === "hotel" && option.isLive === true && quoteSnapshotId != null;
+
   return {
     session_id: sessionId,
     segment_id: segmentId,
@@ -795,6 +1216,9 @@ function buildSelectionPayload({
     activity_option_id: optionType === "activity" ? optionId : null,
     price_delta_amount: option.priceDelta.amount,
     currency: option.priceDelta.currency,
+    metadata: isLiveHotel
+      ? { provider: "ratehawk", quote_snapshot_id: quoteSnapshotId }
+      : {},
   };
 }
 
@@ -896,6 +1320,8 @@ function getOptionColumns(optionType: ItineraryOptionType) {
       "price_delta_amount",
       "currency",
       "is_default",
+      "quote_snapshot_id",
+      "provider_id",
     ].join(",");
   }
 
@@ -956,6 +1382,7 @@ const safeSegmentColumns = [
   "map_zoom",
   "is_required",
   "is_changeable",
+  "metadata",
 ].join(",");
 
 function moneyDelta(value: number | string, currency: string) {
