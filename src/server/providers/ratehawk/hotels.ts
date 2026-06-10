@@ -13,11 +13,11 @@ import { rateHawkRequest, RateHawkError } from "./client";
  * - GET  /api/b2b/v3/overview/              -> credentials & permission check
  * - POST /api/b2b/v3/search/multicomplete/  -> region/hotel autocomplete
  * - POST /api/b2b/v3/search/serp/region/    -> hotel search by region
+ * - POST /api/b2b/v3/search/hp/             -> single-hotel recheck
+ * - POST /api/b2b/v3/hotel/prebook/         -> lock a selected rate
  *
- * Hotelpage (POST /api/b2b/v3/search/hp/), prebook and booking are NOT
- * implemented in this slice. Their paths are recorded in the phase-5 notes so
- * the next slice does not have to re-derive them. See HP-2/HP-3 in
- * dev/claude-hotels-packages-plan.md.
+ * Final booking/order endpoints are intentionally not implemented in this
+ * module yet. See HP-4 in dev-left/phase-5/left.md.
  *
  * Everything returned from this module is a sanitized DTO. Raw provider
  * payloads, internal hashes that are not required downstream, auth headers and
@@ -31,12 +31,18 @@ export const RATEHAWK_ENDPOINTS = {
   multicomplete: "/api/b2b/v3/search/multicomplete/",
   serpRegion: "/api/b2b/v3/search/serp/region/",
   hotelInfo: "/api/b2b/v3/hotel/info/",
+  /** Single-hotel availability recheck; used before prebook to get book_hash. */
+  hotelPage: "/api/b2b/v3/search/hp/",
+  /** Lock a specific rate; non-idempotent - must never auto-retry. */
+  prebook: "/api/b2b/v3/hotel/prebook/",
 } as const;
 
 // Timeouts aligned with submitted RateHawk commitments.
 const SEARCH_TIMEOUT_MS = 30_000;
 const SUGGEST_TIMEOUT_MS = 10_000;
 const OVERVIEW_TIMEOUT_MS = 8_000;
+// Prebook is non-idempotent; shorter timeout so the UX doesn't hang.
+const PREBOOK_TIMEOUT_MS = 15_000;
 
 // ---- Public DTOs -----------------------------------------------------------
 
@@ -780,6 +786,286 @@ export async function getHotelStaticInfo(
   } catch {
     return null;
   }
+}
+
+// ---- Hotelpage (single-hotel availability recheck) -------------------------
+
+export type HotelPageParams = {
+  hotelId: string;
+  matchHash?: string | null;
+  checkin: string;
+  checkout: string;
+  residency: string;
+  guests: GuestRoom[];
+  currency?: string;
+  language?: string;
+  signal?: AbortSignal;
+};
+
+/** One bookable rate returned by search/hp/. */
+export type HotelPageRate = {
+  searchHash: string | null;
+  matchHash: string | null;
+  bookHash: string | null;
+  priceAmount: number;
+  currency: string | null;
+  roomName: string | null;
+  meal: string | null;
+};
+
+/**
+ * POST /api/b2b/v3/search/hp/
+ * Returns all bookable rates for a single hotel. Used before prebook to obtain
+ * the selected hotelpage book_hash; search/match hashes are retained only as
+ * server-side matching context.
+ * Idempotent - safe to retry.
+ */
+export async function searchHotelPage(
+  params: HotelPageParams,
+): Promise<HotelPageRate[]> {
+  const id = params.hotelId.trim();
+
+  if (!id || id.length > 120) {
+    throw new HotelSearchValidationError("hotelId is required");
+  }
+
+  const lang = LANGUAGE_RE.test(params.language ?? "") ? params.language! : "en";
+  const numericHid = /^\d+$/.test(id) ? Number.parseInt(id, 10) : null;
+
+  const body: Record<string, unknown> = {
+    checkin: params.checkin,
+    checkout: params.checkout,
+    residency: params.residency,
+    guests: params.guests.map((g) => ({
+      adults: g.adults,
+      children: g.children,
+    })),
+  };
+
+  if (numericHid !== null && Number.isSafeInteger(numericHid)) {
+    body.hid = numericHid;
+  } else {
+    body.id = id;
+  }
+
+  if (params.currency) {
+    body.currency = params.currency;
+  }
+
+  if (params.matchHash) {
+    body.match_hash = params.matchHash;
+  }
+
+  body.language = lang;
+
+  const response = await rateHawkRequest<unknown>(
+    RATEHAWK_ENDPOINTS.hotelPage,
+    {
+      method: "POST",
+      body,
+      timeoutMs: SEARCH_TIMEOUT_MS,
+      idempotent: true,
+      signal: params.signal,
+    },
+  );
+
+  const data = asRecord(response.data);
+  const hotelRates = asArray(data?.hotels).flatMap((hotel) =>
+    asArray(asRecord(hotel)?.rates),
+  );
+  const rates = hotelRates.length > 0 ? hotelRates : asArray(data?.rates);
+
+  return rates
+    .map((entry): HotelPageRate | null => {
+      const rateRecord = asRecord(entry);
+      const price = extractRatePrice(rateRecord);
+
+      if (!price) {
+        return null;
+      }
+
+      return {
+        searchHash: toCleanString(rateRecord?.search_hash),
+        matchHash: toCleanString(rateRecord?.match_hash),
+        bookHash: toCleanString(rateRecord?.book_hash),
+        priceAmount: price.amount,
+        currency: price.currency,
+        roomName: toCleanString(rateRecord?.room_name),
+        meal: toCleanString(rateRecord?.meal),
+      };
+    })
+    .filter((r): r is HotelPageRate => r !== null);
+}
+
+// ---- Prebook ----------------------------------------------------------------
+
+export type CancellationPolicy = {
+  startsAt: string | null;
+  endsAt: string | null;
+  /** Penalty amount in display currency (show_amount). */
+  amountCharge: number | null;
+  currency: string | null;
+};
+
+export type HotelPrebookResult = {
+  /** Server-only. Store in snapshot metadata. NEVER expose to browser. */
+  prebookHash: string;
+  roomName: string | null;
+  meal: string | null;
+  /** Price in display currency (show_amount / show_currency_code). */
+  priceAmount: number;
+  currency: string | null;
+  /** ISO datetime string; null if no free cancellation window. */
+  cancellationFreeBefore: string | null;
+  cancellationPolicies: CancellationPolicy[];
+};
+
+/**
+ * POST /api/b2b/v3/hotel/prebook/
+ * Locks a specific hotelpage book_hash and returns a provider booking token for
+ * HP-4. The current test response exposes that token as rate.book_hash; if a
+ * future response includes prebook_hash, that is accepted too.
+ *
+ * IMPORTANT: idempotent:false - this call must NEVER auto-retry (each call
+ * may create a different prebook order on the provider side).
+ */
+export async function prebookHotelRate(
+  bookHash: string,
+  language = "en",
+  signal?: AbortSignal,
+): Promise<HotelPrebookResult> {
+  const lang = LANGUAGE_RE.test(language) ? language : "en";
+  const hash = bookHash.trim();
+
+  if (!hash) {
+    throw new HotelSearchValidationError("bookHash is required");
+  }
+
+  const response = await rateHawkRequest<unknown>(
+    RATEHAWK_ENDPOINTS.prebook,
+    {
+      method: "POST",
+      body: { hash, language: lang },
+      timeoutMs: PREBOOK_TIMEOUT_MS,
+      idempotent: false,
+      signal,
+    },
+  );
+
+  const data = asRecord(response.data);
+  const rate = findPrebookRate(data);
+  const prebookHash =
+    toCleanString(rate?.prebook_hash) ?? toCleanString(rate?.book_hash);
+
+  if (!prebookHash) {
+    throw new RateHawkError(
+      "invalid_response",
+      "Provider prebook response missing booking hash",
+    );
+  }
+
+  const paymentOptions = asRecord(rate?.payment_options);
+  const paymentTypes = asArray(paymentOptions?.payment_types);
+
+  let bestPrice: { amount: number; currency: string | null } | null = null;
+  let cancellationFreeBefore: string | null = null;
+  const cancellationPolicies: CancellationPolicy[] = [];
+
+  for (const pt of paymentTypes) {
+    const ptRecord = asRecord(pt);
+    const amount = toFiniteNumber(ptRecord?.show_amount ?? ptRecord?.amount);
+    const price =
+      amount === null
+        ? null
+        : {
+            amount,
+            currency:
+              toCleanString(ptRecord?.show_currency_code) ??
+              toCleanString(ptRecord?.currency_code),
+          };
+
+    if (!price) {
+      continue;
+    }
+
+    if (bestPrice === null || price.amount < bestPrice.amount) {
+      bestPrice = price;
+
+      const penalties = asRecord(ptRecord?.cancellation_penalties);
+      cancellationFreeBefore = toCleanString(penalties?.free_cancellation_before);
+
+      cancellationPolicies.length = 0;
+
+      for (const policy of asArray(penalties?.policies)) {
+        const pr = asRecord(policy);
+
+        if (!pr) {
+          continue;
+        }
+
+        // show_amount is in display currency; fall back to amount_charge.
+        const charge = toFiniteNumber(pr.show_amount ?? pr.amount_charge);
+
+        cancellationPolicies.push({
+          startsAt: toCleanString(pr.start_at),
+          endsAt: toCleanString(pr.end_at),
+          amountCharge: charge,
+          currency: toCleanString(pr.currency_code),
+        });
+      }
+    }
+  }
+
+  if (!bestPrice) {
+    throw new RateHawkError(
+      "invalid_response",
+      "Provider prebook response missing price data",
+    );
+  }
+
+  return {
+    prebookHash,
+    roomName: toCleanString(rate?.room_name),
+    meal: toCleanString(rate?.meal),
+    priceAmount: bestPrice.amount,
+    currency: bestPrice.currency,
+    cancellationFreeBefore,
+    cancellationPolicies,
+  };
+}
+
+function findPrebookRate(
+  data: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!data) {
+    return null;
+  }
+
+  if (toCleanString(data.prebook_hash) || asRecord(data.payment_options)) {
+    return data;
+  }
+
+  for (const hotel of asArray(data.hotels)) {
+    const hotelRecord = asRecord(hotel);
+
+    for (const rate of asArray(hotelRecord?.rates)) {
+      const rateRecord = asRecord(rate);
+
+      if (rateRecord) {
+        return rateRecord;
+      }
+    }
+  }
+
+  for (const rate of asArray(data.rates)) {
+    const rateRecord = asRecord(rate);
+
+    if (rateRecord) {
+      return rateRecord;
+    }
+  }
+
+  return null;
 }
 
 export { RateHawkError };

@@ -24,6 +24,7 @@ import type {
   ItineraryOptionType,
   ItinerarySegmentDTO,
   MoneyDelta,
+  PrebookResultDTO,
   SegmentOptionDTO,
   SegmentOptionsDTO,
   TransferOptionDTO,
@@ -47,6 +48,11 @@ type TripItineraryPlannerProps = {
   basePrice: string;
 };
 
+type PrebookPhase =
+  | { phase: "confirming"; optionId: string }
+  | { phase: "price_changed"; optionId: string; result: PrebookResultDTO }
+  | { phase: "unavailable"; optionId: string };
+
 type OptionPanelState = {
   segment: ItinerarySegmentDTO;
   options: SegmentOptionDTO[];
@@ -55,6 +61,7 @@ type OptionPanelState = {
   error?: string;
   isLoading: boolean;
   isSelecting: boolean;
+  prebook?: PrebookPhase;
 };
 
 const OPTION_ERROR =
@@ -174,13 +181,105 @@ export function TripItineraryPlanner({
       return;
     }
 
+    // Live hotel options go through prebook before selection is recorded.
+    if (option.type === "hotel" && option.isLive) {
+      await prebookThenSelect(option);
+      return;
+    }
+
+    await commitSelection(option);
+  }
+
+  async function prebookThenSelect(option: SegmentOptionDTO) {
+    if (!panel) {
+      return;
+    }
+
     setPanel((current) =>
       current
         ? {
             ...current,
             isSelecting: true,
             error: undefined,
+            prebook: { phase: "confirming", optionId: option.id },
           }
+        : current,
+    );
+
+    let prebookResult: PrebookResultDTO;
+
+    try {
+      prebookResult = await fetchJson<PrebookResultDTO>(
+        `/api/public/trips/${destinationSlug}/${tripSlug}/prebook`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            segmentId: panel.segment.id,
+            optionId: option.id,
+          }),
+        },
+      );
+    } catch {
+      setPanel((current) =>
+        current
+          ? {
+              ...current,
+              isSelecting: false,
+              prebook: undefined,
+              error: "We could not confirm availability. Please try again.",
+            }
+          : current,
+      );
+      return;
+    }
+
+    if (prebookResult.status === "unavailable") {
+      setPanel((current) =>
+        current
+          ? {
+              ...current,
+              isSelecting: false,
+              prebook: { phase: "unavailable", optionId: option.id },
+            }
+          : current,
+      );
+      return;
+    }
+
+    if (prebookResult.status === "price_changed") {
+      setPanel((current) =>
+        current
+          ? {
+              ...current,
+              isSelecting: false,
+              prebook: {
+                phase: "price_changed",
+                optionId: option.id,
+                result: prebookResult,
+              },
+            }
+          : current,
+      );
+      return;
+    }
+
+    // Confirmed — proceed straight to selection.
+    setPanel((current) =>
+      current ? { ...current, prebook: undefined } : current,
+    );
+    await commitSelection(option, prebookResult.prebookId);
+  }
+
+  async function commitSelection(option: SegmentOptionDTO, prebookId?: string | null) {
+    if (!panel || !isOptionType(panel.segment.type)) {
+      return;
+    }
+
+    setPanel((current) =>
+      current
+        ? { ...current, isSelecting: true, error: undefined, prebook: undefined }
         : current,
     );
 
@@ -201,6 +300,7 @@ export function TripItineraryPlanner({
           optionId: option.id,
           travelDate: itinerary.trip.startDate,
           travelersCount: 2,
+          ...(prebookId != null ? { prebookId } : {}),
         }),
       });
 
@@ -316,6 +416,21 @@ export function TripItineraryPlanner({
         onSelect={(option) => {
           void selectOption(option);
         }}
+        onAcceptPriceChange={(option) => {
+          const prebookId =
+            panel?.prebook?.phase === "price_changed"
+              ? panel.prebook.result.prebookId
+              : null;
+          setPanel((current) =>
+            current ? { ...current, prebook: undefined } : current,
+          );
+          void commitSelection(option, prebookId);
+        }}
+        onDismissPrebook={() =>
+          setPanel((current) =>
+            current ? { ...current, prebook: undefined, isSelecting: false } : current,
+          )
+        }
       />
     </section>
   );
@@ -399,15 +514,105 @@ function OptionPanel({
   onDraftChange,
   onReload,
   onSelect,
+  onAcceptPriceChange,
+  onDismissPrebook,
 }: {
   panel: OptionPanelState | null;
   onClose: () => void;
   onDraftChange: (updates: Pick<OptionPanelState, "query" | "sort">) => void;
   onReload: (query: string, sort: string) => void;
   onSelect: (option: SegmentOptionDTO) => void;
+  onAcceptPriceChange: (option: SegmentOptionDTO) => void;
+  onDismissPrebook: () => void;
 }) {
   if (!panel) {
     return null;
+  }
+
+  // Prebook overlay states (price change / unavailable) replace the option list.
+  if (panel.prebook?.phase === "price_changed") {
+    const { result } = panel.prebook;
+    const pendingOption = panel.options.find(
+      (o) => o.id === panel.prebook?.optionId,
+    );
+
+    return (
+      <div className="fixed inset-0 z-[90]">
+        <button
+          type="button"
+          aria-label="Close option selector"
+          onClick={onClose}
+          className="absolute inset-0 bg-black/58 backdrop-blur-sm"
+        />
+        <aside className="absolute right-0 top-0 flex h-full w-full max-w-[860px] flex-col overflow-hidden bg-surface text-brand-navy shadow-[-24px_0_80px_rgb(0_0_0/0.28)] dark:bg-black dark:text-white">
+          <header className="border-b border-border-soft p-5">
+            <div className="flex items-start justify-between gap-4">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-blue dark:text-brand-sand">
+                Price update
+              </p>
+              <button
+                type="button"
+                onClick={onDismissPrebook}
+                className="grid size-10 place-items-center rounded-lg border border-border-soft hover:bg-surface-muted dark:hover:bg-white/[0.08]"
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+            <h2 className="mt-2 text-xl font-extrabold">The price for this room has changed</h2>
+          </header>
+          <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-5">
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand-navy/60 dark:text-white/60">
+                    Previous price
+                  </p>
+                  <p className="mt-1 text-xl font-black line-through opacity-55">
+                    {result.oldPrice.label}
+                  </p>
+                </div>
+                <ArrowRight aria-hidden="true" className="size-5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand-navy/60 dark:text-white/60">
+                    New price
+                  </p>
+                  <p className="mt-1 text-2xl font-black text-amber-700 dark:text-amber-400">
+                    {result.newPrice.label}
+                  </p>
+                </div>
+              </div>
+              {result.cancellationSummary ? (
+                <p className="mt-3 text-xs font-semibold text-brand-navy/60 dark:text-white/60">
+                  {result.cancellationSummary}
+                </p>
+              ) : null}
+            </div>
+            {pendingOption ? (
+              <div className="rounded-lg border border-border-soft p-4">
+                <SelectedOption option={pendingOption} />
+              </div>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => pendingOption && onAcceptPriceChange(pendingOption)}
+                disabled={!pendingOption}
+                className="inline-flex h-12 items-center justify-center rounded-lg bg-brand-blue px-5 text-sm font-extrabold text-white transition hover:bg-brand-blue-strong disabled:cursor-not-allowed disabled:opacity-55 dark:bg-brand-sand dark:text-brand-navy"
+              >
+                Accept new price &amp; continue
+              </button>
+              <button
+                type="button"
+                onClick={onDismissPrebook}
+                className="inline-flex h-12 items-center justify-center rounded-lg border border-border-soft px-5 text-sm font-extrabold transition hover:bg-surface-muted dark:hover:bg-white/[0.08]"
+              >
+                Choose another option
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    );
   }
 
   const queryPlaceholder = getOptionSearchPlaceholder(panel.segment.type);
@@ -479,8 +684,21 @@ function OptionPanel({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
           {panel.error ? (
-            <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm font-bold text-red-700 dark:text-red-200">
+            <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm font-bold text-red-700 dark:text-red-200">
               {panel.error}
+            </div>
+          ) : null}
+
+          {panel.prebook?.phase === "confirming" ? (
+            <div className="mb-4 flex items-center gap-3 rounded-lg border border-brand-blue/20 bg-brand-blue/8 p-4 text-sm font-bold text-brand-blue dark:text-brand-sand">
+              <Loader2 aria-hidden="true" className="size-4 shrink-0 animate-spin" />
+              Confirming your room&hellip;
+            </div>
+          ) : null}
+
+          {panel.prebook?.phase === "unavailable" ? (
+            <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm font-bold text-red-700 dark:text-red-200">
+              This room is no longer available. Please choose another option.
             </div>
           ) : null}
 
@@ -500,6 +718,10 @@ function OptionPanel({
                   key={option.id}
                   option={option}
                   disabled={panel.isSelecting}
+                  confirming={
+                    panel.prebook?.phase === "confirming" &&
+                    panel.prebook.optionId === option.id
+                  }
                   onSelect={() => onSelect(option)}
                 />
               ))}
@@ -522,10 +744,12 @@ function OptionPanel({
 function OptionChoice({
   option,
   disabled,
+  confirming,
   onSelect,
 }: {
   option: SegmentOptionDTO;
   disabled: boolean;
+  confirming: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -545,10 +769,15 @@ function OptionChoice({
             onClick={onSelect}
             className="inline-flex h-11 items-center justify-center rounded-lg bg-brand-blue text-sm font-extrabold text-white transition hover:bg-brand-blue-strong disabled:cursor-not-allowed disabled:opacity-55 dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
           >
-            {disabled ? (
+            {confirming ? (
+              <>
+                <Loader2 aria-hidden="true" className="mr-2 size-4 animate-spin" />
+                Confirming&hellip;
+              </>
+            ) : disabled ? (
               <Loader2 aria-hidden="true" className="mr-2 size-4 animate-spin" />
             ) : null}
-            Select
+            {!confirming ? "Select" : null}
           </button>
         </div>
       </div>

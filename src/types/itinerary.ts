@@ -156,3 +156,18 @@ export type SelectionResultDTO = {
   expiresAt: string;
 };
 
+export type PrebookStatus = "confirmed" | "price_changed" | "unavailable";
+
+export type PrebookResultDTO = {
+  status: PrebookStatus;
+  optionId: string;
+  /** Internal UUID of the stored prebook snapshot — for checkout (HP-4). Never the prebook_hash. */
+  prebookId: string | null;
+  priceChanged: boolean;
+  oldPrice: MoneyDelta;
+  newPrice: MoneyDelta;
+  /** Human-readable cancellation summary, e.g. "Free cancellation until 20 Jun 2026". */
+  cancellationSummary: string | null;
+  expiresAt: string;
+};
+

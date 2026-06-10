@@ -14,17 +14,26 @@ import {
   getSupabasePublicServerClient,
 } from "@/server/supabase/client";
 import { isRateHawkConfigured } from "@/server/providers/ratehawk/config";
+import { RateHawkError } from "@/server/providers/ratehawk/client";
 import {
   buildLiveHotelQuotes,
   buildRequestHash,
   type LiveHotelSearchInput,
 } from "@/server/providers/ratehawk/hotel-options";
+import {
+  searchHotelPage,
+  prebookHotelRate,
+  mapMealToBoardBasis,
+  type GuestRoom,
+  type HotelPrebookResult,
+} from "@/server/providers/ratehawk/hotels";
 import type {
   ActivityOptionDTO,
   FlightOptionDTO,
   HotelOptionDTO,
   ItineraryOptionType,
   ItinerarySegmentDTO,
+  PrebookResultDTO,
   SegmentOptionDTO,
   SegmentOptionsDTO,
   SelectionResultDTO,
@@ -278,6 +287,11 @@ export async function selectSegmentOption({
   const travelersCount = Math.round(
     readNumber(body, "travelersCount", { min: 1, max: 50, fallback: 1 }) ?? 1,
   );
+  // Only present (and required) when selecting a live hotel option.
+  const prebookSnapshotId = readString(body, "prebookId", {
+    required: false,
+    max: 80,
+  });
 
   if (!isKnownOptionType(optionType)) {
     return null;
@@ -312,6 +326,55 @@ export async function selectSegmentOption({
   const sessionToken = existingToken || randomBytes(32).toString("base64url");
   const sessionHash = hashSelectionSessionToken(sessionToken);
   const supabase = getSupabaseAdminClient();
+
+  // Live hotel options require a valid prebook snapshot that is:
+  //  - status = "selected"
+  //  - not expired
+  //  - metadata.quote_snapshot_id matches this option's original quote snapshot
+  // This binds the accepted prebook to the selection so HP-4 booking has an
+  // authoritative prebook_hash and cannot use an arbitrary snapshot.
+  if (quoteSnapshotId !== null) {
+    if (!prebookSnapshotId) {
+      return null;
+    }
+
+    const nowIso = new Date().toISOString();
+    const prebookCheck = await supabase
+      .from("provider_quote_snapshots")
+      .select("id,metadata,status,expires_at")
+      .eq("id", prebookSnapshotId)
+      .maybeSingle();
+
+    if (prebookCheck.error) {
+      throw prebookCheck.error;
+    }
+
+    if (!prebookCheck.data) {
+      return null;
+    }
+
+    type PrebookRow = {
+      id: string;
+      metadata: Record<string, unknown>;
+      status: string;
+      expires_at: string | null;
+    };
+
+    const pb = prebookCheck.data as unknown as PrebookRow;
+
+    if (pb.status !== "selected") {
+      return null;
+    }
+
+    if (pb.expires_at && pb.expires_at <= nowIso) {
+      return null;
+    }
+
+    if (pb.metadata?.quote_snapshot_id !== quoteSnapshotId) {
+      return null;
+    }
+  }
+
   const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
   const sessionResult = await supabase
     .from("trip_option_selection_sessions")
@@ -346,6 +409,7 @@ export async function selectSegmentOption({
     optionId,
     option,
     quoteSnapshotId,
+    prebookSnapshotId: prebookSnapshotId ?? null,
   });
   const selectionResult = await supabase
     .from("trip_option_selections")
@@ -887,6 +951,12 @@ async function getLiveHotelOptions(
             hid: quote.hid,
             room_name: quote.roomName,
             board_basis: quote.boardBasis ?? null,
+            // Stored for HP-3: used in search/hp/ recheck before prebook.
+            checkin: searchInput.checkin,
+            checkout: searchInput.checkout,
+            residency: searchInput.residency,
+            guests: searchInput.guests,
+            currency: searchInput.currency,
           },
           // Server-only hashes for HP-3 prebook; never exposed in any DTO.
           metadata: {
@@ -1195,6 +1265,7 @@ function buildSelectionPayload({
   optionId,
   option,
   quoteSnapshotId,
+  prebookSnapshotId,
 }: {
   sessionId: string;
   segmentId: string;
@@ -1202,9 +1273,10 @@ function buildSelectionPayload({
   optionId: string;
   option: SegmentOptionDTO;
   quoteSnapshotId: string | null;
+  prebookSnapshotId: string | null;
 }) {
-  const isLiveHotel =
-    option.type === "hotel" && option.isLive === true && quoteSnapshotId != null;
+  // quoteSnapshotId is only set for live (provider) options; manual rows are null.
+  const isLiveHotel = option.type === "hotel" && quoteSnapshotId != null;
 
   return {
     session_id: sessionId,
@@ -1217,7 +1289,11 @@ function buildSelectionPayload({
     price_delta_amount: option.priceDelta.amount,
     currency: option.priceDelta.currency,
     metadata: isLiveHotel
-      ? { provider: "ratehawk", quote_snapshot_id: quoteSnapshotId }
+      ? {
+          provider: "ratehawk",
+          quote_snapshot_id: quoteSnapshotId,
+          prebook_snapshot_id: prebookSnapshotId,
+        }
       : {},
   };
 }
@@ -1426,6 +1502,346 @@ function toOptionalNumber(value: number | string | null) {
   const numeric = Number(value);
 
   return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+// ---- HP-3: prebook a live hotel option -------------------------------------
+
+/**
+ * Prebook a RateHawk hotel option before the user proceeds to checkout.
+ *
+ * Flow:
+ *  1. Validate trip / segment / option (must be available and not expired).
+ *  2. For manual options: return confirmed immediately (no ETG call).
+ *  3. Read match_hash from the quote snapshot metadata.
+ *  4. If the snapshot's safe_payload contains valid search params, call
+ *     search/hp/ to get the selected rate's book_hash.
+ *  5. Call hotel/prebook/ with the hotelpage book_hash.
+ *  6. Persist the result in a new provider_quote_snapshots row. The provider
+ *     booking token is stored server-only as metadata.prebook_hash; only safe
+ *     summary fields go into safe_payload.
+ *  7. Return a safe DTO: status, price delta, cancellation summary.
+ *
+ * Never throws to the caller on provider failures - returns {status:"unavailable"}.
+ */
+export async function prebookLiveHotelOption({
+  destinationSlug,
+  tripSlug,
+  segmentId,
+  optionId,
+}: {
+  destinationSlug: string;
+  tripSlug: string;
+  segmentId: string;
+  optionId: string;
+}): Promise<PrebookResultDTO | null> {
+  const context = await getTripContext(destinationSlug, tripSlug, true);
+
+  if (!context) {
+    return null;
+  }
+
+  const segment = await getAdminSegment(context.tripId, segmentId);
+
+  if (!segment || segment.segment_type !== "hotel") {
+    return null;
+  }
+
+  const adminOption = await getAdminOption(
+    "hotel",
+    context.tripId,
+    segmentId,
+    optionId,
+  );
+
+  if (!adminOption) {
+    return null;
+  }
+
+  const { option, quoteSnapshotId } = adminOption;
+
+  // Manual options: no provider call - return confirmed at the listed price.
+  if (!quoteSnapshotId) {
+    return {
+      status: "confirmed",
+      optionId,
+      prebookId: null,
+      priceChanged: false,
+      oldPrice: option.priceDelta,
+      newPrice: option.priceDelta,
+      cancellationSummary: null,
+      expiresAt: new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(),
+    };
+  }
+
+  const admin = getSupabaseAdminClient();
+  const nowIso = new Date().toISOString();
+
+  const snapshotResult = await admin
+    .from("provider_quote_snapshots")
+    .select(
+      "id,provider_reference,metadata,safe_payload,price_amount,currency,expires_at,status",
+    )
+    .eq("id", quoteSnapshotId)
+    .maybeSingle();
+
+  if (snapshotResult.error) {
+    throw snapshotResult.error;
+  }
+
+  if (!snapshotResult.data) {
+    return null;
+  }
+
+  type SnapshotRow = {
+    id: string;
+    provider_reference: string | null;
+    metadata: Record<string, unknown>;
+    safe_payload: Record<string, unknown>;
+    price_amount: number | string | null;
+    currency: string;
+    expires_at: string | null;
+    status: string;
+  };
+
+  const snap = snapshotResult.data as unknown as SnapshotRow;
+
+  if (
+    snap.status !== "available" ||
+    (snap.expires_at && snap.expires_at <= nowIso)
+  ) {
+    return buildUnavailableResult(optionId, option.priceDelta, nowIso);
+  }
+
+  const storedMatchHash =
+    typeof snap.metadata?.match_hash === "string"
+      ? snap.metadata.match_hash
+      : null;
+
+  if (!storedMatchHash) {
+    return buildUnavailableResult(optionId, option.priceDelta, nowIso);
+  }
+
+  let bookHash: string | null = null;
+  let matchedSearchHash: string | null = null;
+  let matchedMatchHash: string | null = storedMatchHash;
+
+  const safePayload = isPlainRecord(snap.safe_payload) ? snap.safe_payload : {};
+  const rawHid = safePayload.hid;
+  const safeHid =
+    typeof rawHid === "string" || typeof rawHid === "number"
+      ? toOptionalNumber(rawHid)
+      : null;
+  const hotelId =
+    safeHid != null
+      ? String(Math.trunc(safeHid))
+      : typeof snap.provider_reference === "string"
+        ? snap.provider_reference
+        : null;
+  const checkin =
+    typeof safePayload.checkin === "string" ? safePayload.checkin : null;
+  const checkout =
+    typeof safePayload.checkout === "string" ? safePayload.checkout : null;
+  const residency =
+    typeof safePayload.residency === "string" ? safePayload.residency : null;
+  const currency =
+    typeof safePayload.currency === "string"
+      ? safePayload.currency
+      : context.currency;
+  const guests = parseGuestRooms(safePayload.guests);
+
+  if (hotelId && checkin && checkout && residency && guests) {
+    try {
+      const hpRates = await searchHotelPage({
+        hotelId,
+        matchHash: storedMatchHash,
+        checkin,
+        checkout,
+        residency,
+        guests,
+        currency,
+        language: "en",
+      });
+
+      const freshRate = hpRates.find((r) => r.matchHash === storedMatchHash);
+
+      if (!freshRate || !freshRate.bookHash) {
+        // Rate is no longer listed for this hotel.
+        return buildUnavailableResult(optionId, option.priceDelta, nowIso);
+      }
+
+      bookHash = freshRate.bookHash;
+      matchedSearchHash = freshRate.searchHash;
+      matchedMatchHash = freshRate.matchHash;
+    } catch (error) {
+      // hp search failed; without a safe hotelpage book_hash we cannot prebook.
+      logServerError("itinerary.hotel.prebook.hp_refresh", error);
+    }
+  }
+
+  if (!bookHash) {
+    return buildUnavailableResult(optionId, option.priceDelta, nowIso);
+  }
+
+  let prebookResult: HotelPrebookResult;
+
+  try {
+    prebookResult = await prebookHotelRate(bookHash, "en");
+  } catch (error) {
+    if (
+      error instanceof RateHawkError &&
+      (error.code === "provider_error" || error.code === "http_error")
+    ) {
+      return buildUnavailableResult(optionId, option.priceDelta, nowIso);
+    }
+
+    throw error;
+  }
+
+  const oldAmount = Number(snap.price_amount ?? 0);
+  const newAmount = prebookResult.priceAmount;
+  const priceChanged = Math.abs(newAmount - oldAmount) >= 0.01;
+  const prebookCurrency = prebookResult.currency ?? snap.currency;
+  const cancellationSummary = buildCancellationSummary(
+    prebookResult.cancellationFreeBefore,
+    prebookResult.cancellationPolicies.length,
+  );
+
+  const prebookExpiresAt = new Date(
+    Date.now() + LIVE_OPTION_TTL_MS,
+  ).toISOString();
+
+  const providerId = await getOrCreateRateHawkProviderId();
+
+  const prebookInsert = await admin
+    .from("provider_quote_snapshots")
+    .insert({
+      provider_id: providerId,
+      service_type: "hotel",
+      request_hash: `prebook:${quoteSnapshotId}`,
+      provider_reference: String(safePayload.hid ?? snap.provider_reference ?? ""),
+      currency: prebookCurrency,
+      price_amount: newAmount,
+      price_delta_amount: newAmount,
+      expires_at: prebookExpiresAt,
+      status: "selected",
+      safe_payload: {
+        prebook_for_snapshot_id: quoteSnapshotId,
+        room_name: prebookResult.roomName,
+        board_basis: prebookResult.meal
+          ? (mapMealToBoardBasis(prebookResult.meal) ?? null)
+          : null,
+        cancellation_free_before: prebookResult.cancellationFreeBefore,
+        policies_count: prebookResult.cancellationPolicies.length,
+        price_at_prebook: newAmount,
+        price_at_serp: oldAmount,
+      },
+      // prebook_hash is server-only - used in HP-4 booking; never returned to browser.
+      metadata: {
+        prebook_hash: prebookResult.prebookHash,
+        quote_snapshot_id: quoteSnapshotId,
+        hotelpage_book_hash_used: bookHash,
+        search_hash_used: matchedSearchHash,
+        match_hash_used: matchedMatchHash,
+      },
+    })
+    .select("id")
+    .single();
+
+  if (prebookInsert.error) {
+    throw prebookInsert.error;
+  }
+
+  const prebookId = (prebookInsert.data as unknown as { id: string }).id;
+
+  return {
+    status: priceChanged ? "price_changed" : "confirmed",
+    optionId,
+    prebookId,
+    priceChanged,
+    oldPrice: moneyDelta(oldAmount, snap.currency),
+    newPrice: moneyDelta(newAmount, prebookCurrency),
+    cancellationSummary,
+    expiresAt: prebookExpiresAt,
+  };
+}
+
+function buildUnavailableResult(
+  optionId: string,
+  existingPrice: ReturnType<typeof moneyDelta>,
+  nowIso: string,
+): PrebookResultDTO {
+  return {
+    status: "unavailable",
+    optionId,
+    prebookId: null,
+    priceChanged: false,
+    oldPrice: existingPrice,
+    newPrice: existingPrice,
+    cancellationSummary: null,
+    expiresAt: nowIso,
+  };
+}
+
+function parseGuestRooms(raw: unknown): GuestRoom[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return null;
+  }
+
+  const rooms: GuestRoom[] = [];
+
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return null;
+    }
+
+    const rec = entry as Record<string, unknown>;
+    const adults =
+      typeof rec.adults === "number" && Number.isInteger(rec.adults)
+        ? rec.adults
+        : null;
+
+    if (!adults || adults < 1) {
+      return null;
+    }
+
+    const children = Array.isArray(rec.children)
+      ? (rec.children as unknown[])
+          .map((c) => (typeof c === "number" && Number.isInteger(c) ? c : null))
+          .filter((n): n is number => n !== null)
+      : [];
+
+    rooms.push({ adults, children });
+  }
+
+  return rooms.length > 0 ? rooms : null;
+}
+
+function buildCancellationSummary(
+  freeBefore: string | null,
+  policiesCount: number,
+): string | null {
+  if (freeBefore) {
+    try {
+      const date = new Date(freeBefore);
+
+      if (!Number.isNaN(date.getTime())) {
+        return `Free cancellation until ${date.toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          timeZone: "UTC",
+        })}`;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (policiesCount === 0) {
+    return "Non-refundable";
+  }
+
+  return "Cancellation fees apply";
 }
 
 export function hashSelectionSessionToken(token: string) {
