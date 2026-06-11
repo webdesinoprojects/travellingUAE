@@ -88,6 +88,7 @@ export function TripItineraryPlanner({
   );
   const [panel, setPanel] = useState<OptionPanelState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [hasMadeSelection, setHasMadeSelection] = useState(false);
   const summary = useMemo(() => buildTimelineSummary(segments), [segments]);
 
   async function openOptions(segment: ItinerarySegmentDTO) {
@@ -265,7 +266,7 @@ export function TripItineraryPlanner({
       return;
     }
 
-    // Confirmed — proceed straight to selection.
+    // Confirmed - proceed straight to selection.
     setPanel((current) =>
       current ? { ...current, prebook: undefined } : current,
     );
@@ -312,6 +313,7 @@ export function TripItineraryPlanner({
         ),
       );
       setTotalDelta(result.totalDelta);
+      setHasMadeSelection(true);
       setNotice("Your package option has been updated.");
       setPanel(null);
     } catch {
@@ -399,6 +401,16 @@ export function TripItineraryPlanner({
               {totalDelta.label}
             </p>
           </div>
+
+          {hasMadeSelection ? (
+            <a
+              href={`/trips/${destinationSlug}/${tripSlug}/checkout`}
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-extrabold text-white transition hover:bg-brand-blue-strong dark:bg-brand-sand dark:text-brand-navy"
+            >
+              Continue to checkout
+              <ArrowRight aria-hidden="true" className="size-4" />
+            </a>
+          ) : null}
         </aside>
       </div>
 

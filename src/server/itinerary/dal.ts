@@ -29,6 +29,8 @@ import {
 } from "@/server/providers/ratehawk/hotels";
 import type {
   ActivityOptionDTO,
+  CheckoutLineItem,
+  CheckoutSummaryDTO,
   FlightOptionDTO,
   HotelOptionDTO,
   ItineraryOptionType,
@@ -1842,6 +1844,298 @@ function buildCancellationSummary(
   }
 
   return "Cancellation fees apply";
+}
+
+export async function getCheckoutSummary({
+  destinationSlug,
+  tripSlug,
+  sessionToken,
+}: {
+  destinationSlug: string;
+  tripSlug: string;
+  sessionToken: string | undefined;
+}): Promise<CheckoutSummaryDTO | null> {
+  if (!sessionToken) {
+    return null;
+  }
+
+  const tripCtx = await getTripContext(destinationSlug, tripSlug, true);
+
+  if (!tripCtx) {
+    return null;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const nowIso = new Date().toISOString();
+  const sessionHash = hashSelectionSessionToken(sessionToken);
+
+  const sessionResult = await supabase
+    .from("trip_option_selection_sessions")
+    .select("id,travelers_count,travel_date,total_delta_amount,currency,expires_at")
+    .eq("session_token_hash", sessionHash)
+    .eq("trip_id", tripCtx.tripId)
+    .eq("status", "draft")
+    .gt("expires_at", nowIso)
+    .maybeSingle();
+
+  if (sessionResult.error) {
+    throw sessionResult.error;
+  }
+
+  if (!sessionResult.data) {
+    return null;
+  }
+
+  type SessionRow = {
+    id: string;
+    travelers_count: number;
+    travel_date: string | null;
+    total_delta_amount: number | string | null;
+    currency: string;
+    expires_at: string;
+  };
+
+  const sess = sessionResult.data as unknown as SessionRow;
+
+  const selectionsResult = await supabase
+    .from("trip_option_selections")
+    .select(
+      "segment_id,option_type,flight_option_id,hotel_option_id,transfer_option_id,activity_option_id,price_delta_amount,currency,metadata",
+    )
+    .eq("session_id", sess.id);
+
+  if (selectionsResult.error) {
+    throw selectionsResult.error;
+  }
+
+  type SelectionRow = {
+    segment_id: string;
+    option_type: string;
+    flight_option_id: string | null;
+    hotel_option_id: string | null;
+    transfer_option_id: string | null;
+    activity_option_id: string | null;
+    price_delta_amount: number | string;
+    currency: string;
+    metadata: Record<string, unknown> | null;
+  };
+
+  const selectionRows = (selectionsResult.data ?? []) as unknown as SelectionRow[];
+
+  if (selectionRows.length === 0) {
+    return null;
+  }
+
+  // Batch-load segment titles.
+  const segmentIds = [...new Set(selectionRows.map((r) => r.segment_id))];
+  const segmentsResult = await supabase
+    .from("trip_itinerary_segments")
+    .select("id,title")
+    .eq("trip_id", tripCtx.tripId)
+    .in("id", segmentIds);
+
+  if (segmentsResult.error) {
+    throw segmentsResult.error;
+  }
+
+  const segmentTitleMap = new Map<string, string>(
+    (
+      (segmentsResult.data ?? []) as unknown as Array<{
+        id: string;
+        title: string;
+      }>
+    ).map((s) => [s.id, s.title]),
+  );
+
+  // Batch-load option display info grouped by type.
+  const hotelIds = selectionRows
+    .filter((r) => r.hotel_option_id)
+    .map((r) => r.hotel_option_id!);
+  const flightIds = selectionRows
+    .filter((r) => r.flight_option_id)
+    .map((r) => r.flight_option_id!);
+  const transferIds = selectionRows
+    .filter((r) => r.transfer_option_id)
+    .map((r) => r.transfer_option_id!);
+  const activityIds = selectionRows
+    .filter((r) => r.activity_option_id)
+    .map((r) => r.activity_option_id!);
+
+  const [hotelRes, flightRes, transferRes, activityRes] = await Promise.all([
+    hotelIds.length > 0
+      ? supabase
+          .from("trip_hotel_options")
+          .select("id,hotel_name,room_name,board_basis")
+          .in("id", hotelIds)
+      : Promise.resolve({ data: [] as unknown[], error: null }),
+    flightIds.length > 0
+      ? supabase
+          .from("trip_flight_options")
+          .select("id,airline_name,origin_iata,destination_iata")
+          .in("id", flightIds)
+      : Promise.resolve({ data: [] as unknown[], error: null }),
+    transferIds.length > 0
+      ? supabase
+          .from("trip_transfer_options")
+          .select("id,title")
+          .in("id", transferIds)
+      : Promise.resolve({ data: [] as unknown[], error: null }),
+    activityIds.length > 0
+      ? supabase
+          .from("trip_activity_options")
+          .select("id,title")
+          .in("id", activityIds)
+      : Promise.resolve({ data: [] as unknown[], error: null }),
+  ]);
+
+  if (hotelRes.error) throw hotelRes.error;
+  if (flightRes.error) throw flightRes.error;
+  if (transferRes.error) throw transferRes.error;
+  if (activityRes.error) throw activityRes.error;
+
+  type HotelOptRow = {
+    id: string;
+    hotel_name: string;
+    room_name: string | null;
+    board_basis: string | null;
+  };
+  type FlightOptRow = {
+    id: string;
+    airline_name: string;
+    origin_iata: string | null;
+    destination_iata: string | null;
+  };
+  type TransferOptRow = { id: string; title: string };
+  type ActivityOptRow = { id: string; title: string };
+
+  const hotelOptMap = new Map<string, HotelOptRow>(
+    ((hotelRes.data ?? []) as unknown as HotelOptRow[]).map((h) => [h.id, h]),
+  );
+  const flightOptMap = new Map<string, FlightOptRow>(
+    ((flightRes.data ?? []) as unknown as FlightOptRow[]).map((f) => [f.id, f]),
+  );
+  const transferOptMap = new Map<string, TransferOptRow>(
+    (
+      (transferRes.data ?? []) as unknown as TransferOptRow[]
+    ).map((t) => [t.id, t]),
+  );
+  const activityOptMap = new Map<string, ActivityOptRow>(
+    (
+      (activityRes.data ?? []) as unknown as ActivityOptRow[]
+    ).map((a) => [a.id, a]),
+  );
+
+  // Validate prebook snapshots for live hotel selections.
+  const prebookSnapshotIds = selectionRows
+    .filter(
+      (r) =>
+        isPlainRecord(r.metadata) &&
+        typeof r.metadata.prebook_snapshot_id === "string",
+    )
+    .map((r) => (r.metadata as Record<string, unknown>).prebook_snapshot_id as string);
+
+  type PrebookSafeRow = {
+    id: string;
+    status: string;
+    expires_at: string | null;
+    safe_payload: Record<string, unknown> | null;
+  };
+
+  const prebookSafeMap = new Map<string, PrebookSafeRow>();
+
+  if (prebookSnapshotIds.length > 0) {
+    const prebookRes = await supabase
+      .from("provider_quote_snapshots")
+      .select("id,status,expires_at,safe_payload")
+      .in("id", prebookSnapshotIds);
+
+    if (prebookRes.error) {
+      throw prebookRes.error;
+    }
+
+    for (const row of (prebookRes.data ?? []) as unknown as PrebookSafeRow[]) {
+      prebookSafeMap.set(row.id, row);
+    }
+  }
+
+  // Build line items.
+  const selections: CheckoutLineItem[] = [];
+
+  for (const row of selectionRows) {
+    const segmentTitle = segmentTitleMap.get(row.segment_id) ?? "Option";
+    const optionType = row.option_type as ItineraryOptionType;
+    let optionLabel = "Selected option";
+    let cancellationSummary: string | null | undefined;
+
+    if (optionType === "hotel" && row.hotel_option_id) {
+      const h = hotelOptMap.get(row.hotel_option_id);
+
+      if (h) {
+        optionLabel = [h.hotel_name, h.room_name].filter(Boolean).join(" - ");
+      }
+
+      const meta = row.metadata;
+
+      if (isPlainRecord(meta) && typeof meta.prebook_snapshot_id === "string") {
+        const pb = prebookSafeMap.get(meta.prebook_snapshot_id);
+
+        if (!pb || pb.status !== "selected" || (pb.expires_at && pb.expires_at <= nowIso)) {
+          // Prebook expired or invalid - checkout is stale.
+          return null;
+        }
+
+        const safeP = isPlainRecord(pb.safe_payload) ? pb.safe_payload : {};
+        cancellationSummary =
+          typeof safeP.cancellation_summary === "string"
+            ? safeP.cancellation_summary
+            : null;
+      }
+    } else if (optionType === "flight" && row.flight_option_id) {
+      const f = flightOptMap.get(row.flight_option_id);
+
+      if (f) {
+        const route =
+          f.origin_iata && f.destination_iata
+            ? `${f.origin_iata} to ${f.destination_iata}`
+            : null;
+        optionLabel = [f.airline_name, route].filter(Boolean).join(" ");
+      }
+    } else if (optionType === "transfer" && row.transfer_option_id) {
+      const t = transferOptMap.get(row.transfer_option_id);
+      if (t) optionLabel = t.title;
+    } else if (optionType === "activity" && row.activity_option_id) {
+      const a = activityOptMap.get(row.activity_option_id);
+      if (a) optionLabel = a.title;
+    }
+
+    selections.push({
+      segmentId: row.segment_id,
+      segmentTitle,
+      type: optionType,
+      optionLabel,
+      priceDelta: moneyDelta(row.price_delta_amount, row.currency),
+      ...(cancellationSummary !== undefined ? { cancellationSummary } : {}),
+    });
+  }
+
+  return {
+    trip: {
+      id: tripCtx.tripId,
+      title: tripCtx.tripTitle,
+      destinationSlug: tripCtx.destinationSlug,
+      destinationName: tripCtx.destinationName,
+      startDate: tripCtx.startDate,
+      currency: tripCtx.currency,
+    },
+    selections,
+    travelDate: sess.travel_date ?? undefined,
+    travelersCount: sess.travelers_count,
+    totalDelta: moneyDelta(
+      Number(sess.total_delta_amount ?? 0),
+      sess.currency || tripCtx.currency,
+    ),
+    expiresAt: sess.expires_at,
+  };
 }
 
 export function hashSelectionSessionToken(token: string) {

@@ -156,12 +156,37 @@ export type SelectionResultDTO = {
   expiresAt: string;
 };
 
+export type CheckoutLineItem = {
+  segmentId: string;
+  segmentTitle: string;
+  type: ItinerarySegmentType;
+  optionLabel: string;
+  priceDelta: MoneyDelta;
+  cancellationSummary?: string | null;
+};
+
+export type CheckoutSummaryDTO = {
+  trip: {
+    id: string;
+    title: string;
+    destinationSlug: string;
+    destinationName: string;
+    startDate?: string;
+    currency: string;
+  };
+  selections: CheckoutLineItem[];
+  travelDate?: string;
+  travelersCount: number;
+  totalDelta: MoneyDelta;
+  expiresAt: string;
+};
+
 export type PrebookStatus = "confirmed" | "price_changed" | "unavailable";
 
 export type PrebookResultDTO = {
   status: PrebookStatus;
   optionId: string;
-  /** Internal UUID of the stored prebook snapshot — for checkout (HP-4). Never the prebook_hash. */
+  /** Internal UUID of the stored prebook snapshot - for checkout (HP-4). Never the prebook_hash. */
   prebookId: string | null;
   priceChanged: boolean;
   oldPrice: MoneyDelta;
@@ -170,4 +195,3 @@ export type PrebookResultDTO = {
   cancellationSummary: string | null;
   expiresAt: string;
 };
-

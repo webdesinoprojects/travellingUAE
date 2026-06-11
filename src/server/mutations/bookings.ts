@@ -91,6 +91,244 @@ export async function createBooking(
   };
 }
 
+// ── Stripe payment booking helpers ──────────────────────────────────────────
+
+/**
+ * Create a booking in payment_status='pending' before a Stripe Checkout session is created.
+ * Records the planned charge amount so we can verify it matches the actual Stripe charge.
+ * Returns the new booking UUID.
+ */
+export async function createPaymentPendingBooking({
+  tripId,
+  destinationSlug,
+  tripSlug,
+  fullName,
+  email,
+  phone,
+  nationality,
+  travelersCount,
+  travelDate,
+  message,
+  optionSessionToken,
+  optionAddOnAmount,
+  optionAddOnCurrency,
+}: {
+  tripId: string;
+  destinationSlug: string;
+  tripSlug: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  nationality?: string | null;
+  travelersCount: number;
+  travelDate?: string;
+  message?: string | null;
+  optionSessionToken?: string;
+  /** The option add-on amount being charged (delta-only, NOT the full trip price). */
+  optionAddOnAmount: number;
+  optionAddOnCurrency: string;
+}): Promise<string> {
+  const supabase = getSupabaseAdminClient();
+  const optionSessionId = await resolveOptionSessionId({ optionSessionToken, tripId });
+
+  const result = await supabase
+    .from("bookings")
+    .insert({
+      trip_id: tripId,
+      customer_name: fullName,
+      customer_email: email,
+      customer_phone: phone,
+      nationality: nationality ?? null,
+      travelers_count: travelersCount,
+      travel_date: travelDate ?? null,
+      message: message ?? null,
+      option_session_id: optionSessionId,
+      payment_status: "pending",
+      metadata: {
+        source: "stripe_checkout",
+        // SP-1 charges only the option add-on (hotel delta), not the full trip base price.
+        charge_type: "option_add_on",
+        planned_charge_amount: optionAddOnAmount,
+        planned_charge_currency: optionAddOnCurrency,
+        destinationSlug,
+        tripSlug,
+      },
+    })
+    .select("id")
+    .single();
+
+  if (result.error) throw result.error;
+  return (result.data as { id: string }).id;
+}
+
+/** After Stripe session is created, link its ID to the booking row. */
+export async function linkStripeSessionToBooking({
+  bookingId,
+  stripeSessionId,
+}: {
+  bookingId: string;
+  stripeSessionId: string;
+}): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const result = await supabase
+    .from("bookings")
+    .update({ stripe_checkout_session_id: stripeSessionId })
+    .eq("id", bookingId)
+    .eq("payment_status", "pending");
+  if (result.error) throw result.error;
+}
+
+/**
+ * Cancel a pending booking that has no linked Stripe session (orphan cleanup).
+ * Only applies to bookings in 'pending' state to avoid clobbering real data.
+ */
+export async function cancelOrphanBooking(bookingId: string): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  // Use 'failed' to mark it as a non-chargeable dead record.
+  const result = await supabase
+    .from("bookings")
+    .update({ payment_status: "failed" })
+    .eq("id", bookingId)
+    .eq("payment_status", "pending")
+    .is("stripe_checkout_session_id", null);
+  if (result.error) {
+    // Log only - the booking being left in 'pending' is not a security issue, just DB cleanup debt.
+    console.error("[bookings.cancelOrphanBooking]", result.error.message);
+  }
+}
+
+/**
+ * Idempotent status update by Stripe checkout session ID.
+ * Guards:
+ *   - 'paid' is terminal - never overwritten.
+ *   - 'expired' and 'failed' only apply from 'pending' (prevent downgrading a confirmed payment).
+ * Throws on DB error so the webhook caller can return 5xx and trigger Stripe retry.
+ */
+export async function updatePaymentStatusBySession({
+  stripeSessionId,
+  paymentStatus,
+  stripePaymentIntentId,
+  paidAmountUnits,
+  paidCurrency,
+}: {
+  stripeSessionId: string;
+  paymentStatus: "paid" | "failed" | "expired";
+  stripePaymentIntentId?: string | null;
+  /** Stripe amount_total (smallest units) - only set when paymentStatus='paid'. */
+  paidAmountUnits?: number | null;
+  paidCurrency?: string | null;
+}): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const patch: Record<string, unknown> = { payment_status: paymentStatus };
+
+  if (stripePaymentIntentId) patch.stripe_payment_intent_id = stripePaymentIntentId;
+
+  if (paymentStatus === "paid") {
+    patch.paid_at = new Date().toISOString();
+    if (paidAmountUnits != null && paidCurrency) {
+      // Convert from Stripe smallest units to major units for storage.
+      const { fromStripeAmount } = await import("@/server/payments/stripe");
+      patch.paid_amount = fromStripeAmount(paidAmountUnits, paidCurrency);
+      patch.paid_currency = paidCurrency.toUpperCase();
+    }
+  }
+
+  // 'paid' is terminal - never downgrade it.
+  // For 'expired'/'failed', only apply from 'pending' to prevent regressing a confirmed payment.
+  const query = supabase
+    .from("bookings")
+    .update(patch)
+    .eq("stripe_checkout_session_id", stripeSessionId);
+
+  const guardedQuery =
+    paymentStatus === "paid"
+      ? query.neq("payment_status", "paid") // idempotent if already paid
+      : query.eq("payment_status", "pending"); // expired/failed only from pending
+
+  const result = await guardedQuery;
+  if (result.error) throw result.error;
+  // 0 rows affected = already processed (idempotent success) or session not found - both fine.
+}
+
+/**
+ * Idempotent status update by internal booking ID (used for payment_intent.payment_failed).
+ * 'paid' is terminal and will not be overwritten.
+ */
+export async function updatePaymentStatusByBookingId({
+  bookingId,
+  paymentStatus,
+}: {
+  bookingId: string;
+  paymentStatus: "paid" | "failed" | "expired";
+}): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const result = await supabase
+    .from("bookings")
+    .update({ payment_status: paymentStatus })
+    .eq("id", bookingId)
+    .neq("payment_status", "paid"); // paid is terminal
+  if (result.error) throw result.error;
+}
+
+type SuccessPagePaymentStatus =
+  | "paid"
+  | "pending"
+  | "failed"
+  | "expired"
+  | "not_found";
+
+/**
+ * Verify a Stripe session ID belongs to a booking for THIS specific trip/destination.
+ * Prevents a valid Stripe session from a different trip from showing a success state.
+ * Returns 'not_found' if the session is not in our DB or does not match the trip.
+ */
+export async function getBookingPaymentForSuccessPage({
+  stripeSessionId,
+  destinationSlug,
+  tripSlug,
+}: {
+  stripeSessionId: string;
+  destinationSlug: string;
+  tripSlug: string;
+}): Promise<SuccessPagePaymentStatus> {
+  const supabase = getSupabaseAdminClient();
+
+  // Resolve trip ID from slugs to gate the booking lookup.
+  const tripResult = await supabase
+    .from("trips")
+    .select("id, destinations!inner(slug)")
+    .eq("slug", tripSlug)
+    .maybeSingle();
+
+  if (tripResult.error) throw tripResult.error;
+  if (!tripResult.data) return "not_found";
+
+  const trip = tripResult.data as {
+    id: string;
+    destinations: { slug: string } | { slug: string }[];
+  };
+  const destSlug = Array.isArray(trip.destinations)
+    ? trip.destinations[0]?.slug
+    : trip.destinations.slug;
+  if (destSlug !== destinationSlug) return "not_found";
+
+  // Look up booking by session ID AND trip ID - both must match.
+  const bookingResult = await supabase
+    .from("bookings")
+    .select("payment_status")
+    .eq("stripe_checkout_session_id", stripeSessionId)
+    .eq("trip_id", trip.id)
+    .maybeSingle();
+
+  if (bookingResult.error) throw bookingResult.error;
+  if (!bookingResult.data) return "not_found";
+
+  const row = bookingResult.data as { payment_status: string | null };
+  return (row.payment_status as SuccessPagePaymentStatus) ?? "not_found";
+}
+
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
 async function resolveOptionSessionId({
   optionSessionToken,
   tripId,
