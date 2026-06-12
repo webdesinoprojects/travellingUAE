@@ -163,6 +163,8 @@ export type CheckoutLineItem = {
   optionLabel: string;
   priceDelta: MoneyDelta;
   cancellationSummary?: string | null;
+  boardBasis?: string | null;
+  nights?: number | null;
 };
 
 export type CheckoutSummaryDTO = {

@@ -186,6 +186,18 @@ function SelectionLineCard({ item }: { item: CheckoutLineItem }) {
           <p className="mt-1 text-sm font-extrabold text-brand-navy dark:text-white">
             {item.optionLabel}
           </p>
+          {item.type === "hotel" && (item.boardBasis || item.nights) ? (
+            <p className="mt-1 text-xs text-brand-navy/60 dark:text-white/55">
+              {[
+                item.boardBasis,
+                item.nights
+                  ? `${item.nights} night${item.nights !== 1 ? "s" : ""}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          ) : null}
           {item.cancellationSummary ? (
             <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-brand-green">
               <CheckCircle2 aria-hidden="true" className="size-3.5 shrink-0" />

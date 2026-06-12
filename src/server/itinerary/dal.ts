@@ -1707,6 +1707,13 @@ export async function prebookLiveHotelOption({
     prebookResult.cancellationFreeBefore,
     prebookResult.cancellationPolicies.length,
   );
+  const stayNights =
+    checkin && checkout
+      ? Math.round(
+          (new Date(checkout).getTime() - new Date(checkin).getTime()) /
+            86_400_000,
+        )
+      : null;
 
   const prebookExpiresAt = new Date(
     Date.now() + LIVE_OPTION_TTL_MS,
@@ -1732,6 +1739,8 @@ export async function prebookLiveHotelOption({
         board_basis: prebookResult.meal
           ? (mapMealToBoardBasis(prebookResult.meal) ?? null)
           : null,
+        nights: stayNights,
+        cancellation_summary: cancellationSummary,
         cancellation_free_before: prebookResult.cancellationFreeBefore,
         policies_count: prebookResult.cancellationPolicies.length,
         price_at_prebook: newAmount,
@@ -2066,6 +2075,8 @@ export async function getCheckoutSummary({
     const optionType = row.option_type as ItineraryOptionType;
     let optionLabel = "Selected option";
     let cancellationSummary: string | null | undefined;
+    let boardBasis: string | null | undefined;
+    let nights: number | null | undefined;
 
     if (optionType === "hotel" && row.hotel_option_id) {
       const h = hotelOptMap.get(row.hotel_option_id);
@@ -2089,6 +2100,10 @@ export async function getCheckoutSummary({
           typeof safeP.cancellation_summary === "string"
             ? safeP.cancellation_summary
             : null;
+        boardBasis =
+          typeof safeP.board_basis === "string" ? safeP.board_basis : null;
+        nights =
+          typeof safeP.nights === "number" ? safeP.nights : null;
       }
     } else if (optionType === "flight" && row.flight_option_id) {
       const f = flightOptMap.get(row.flight_option_id);
@@ -2115,6 +2130,8 @@ export async function getCheckoutSummary({
       optionLabel,
       priceDelta: moneyDelta(row.price_delta_amount, row.currency),
       ...(cancellationSummary !== undefined ? { cancellationSummary } : {}),
+      ...(boardBasis !== undefined ? { boardBasis } : {}),
+      ...(nights !== undefined ? { nights } : {}),
     });
   }
 

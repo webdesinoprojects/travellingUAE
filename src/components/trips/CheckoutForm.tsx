@@ -183,7 +183,7 @@ export function CheckoutForm({
           htmlFor="travelersCount"
           className="block text-sm font-extrabold text-brand-navy dark:text-white"
         >
-          Number of travelers <span className="ml-1 text-brand-blue dark:text-brand-sand">*</span>
+          Total party size <span className="ml-1 text-brand-blue dark:text-brand-sand">*</span>
         </label>
         <input
           id="travelersCount"
@@ -196,6 +196,9 @@ export function CheckoutForm({
           required
           className="mt-1.5 block h-11 w-full rounded-lg border border-border-soft bg-surface px-3.5 text-sm text-brand-navy outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:ring-brand-sand/30 dark:focus:border-brand-sand"
         />
+        <p className="mt-1.5 text-xs text-brand-navy/50 dark:text-white/45">
+          For our travel team. Room price is fixed per the selected room type.
+        </p>
       </div>
 
       <div>
