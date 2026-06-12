@@ -13,7 +13,8 @@ type Field = {
 };
 
 const fields: Field[] = [
-  { name: "fullName", label: "Full name", type: "text", required: true, placeholder: "As on passport" },
+  { name: "firstName", label: "First name", type: "text", required: true, placeholder: "As on passport" },
+  { name: "lastName", label: "Last name", type: "text", required: true, placeholder: "" },
   { name: "email", label: "Email", type: "email", required: true, placeholder: "you@example.com" },
   { name: "phone", label: "Phone / WhatsApp", type: "tel", required: true, placeholder: "+971 50 000 0000" },
   { name: "nationality", label: "Nationality", type: "text", required: false, placeholder: "e.g. Emirati, Indian, British" },
@@ -56,7 +57,8 @@ export function CheckoutForm({
     const body = {
       destinationSlug,
       tripSlug,
-      fullName: data.get("fullName") as string,
+      firstName: data.get("firstName") as string,
+      lastName: data.get("lastName") as string,
       email: data.get("email") as string,
       phone: data.get("phone") as string,
       nationality: data.get("nationality") as string | undefined,
@@ -97,7 +99,8 @@ export function CheckoutForm({
 
     const data = new FormData(form);
     const body = {
-      fullName: data.get("fullName"),
+      firstName: data.get("firstName"),
+      lastName: data.get("lastName"),
       email: data.get("email"),
       phone: data.get("phone"),
       nationality: data.get("nationality"),
@@ -172,7 +175,7 @@ export function CheckoutForm({
             type={field.type}
             required={field.required}
             placeholder={field.placeholder}
-            autoComplete={field.type === "email" ? "email" : field.type === "tel" ? "tel" : "off"}
+            autoComplete={field.name === "firstName" ? "given-name" : field.name === "lastName" ? "family-name" : field.type === "email" ? "email" : field.type === "tel" ? "tel" : "off"}
             className="mt-1.5 block h-11 w-full rounded-lg border border-border-soft bg-surface px-3.5 text-sm text-brand-navy placeholder-brand-navy/38 outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:placeholder-white/30 dark:ring-brand-sand/30 dark:focus:border-brand-sand"
           />
         </div>

@@ -33,11 +33,18 @@ export async function createBooking(
   }
 
   const body = await readJsonObject(request);
-  const fullName = readString(body, "fullName", {
-    min: 2,
-    max: 120,
-    required: true,
-  })!;
+  // Accept firstName+lastName (new checkout form) or legacy fullName for backward-compat.
+  const firstName = readString(body, "firstName", { min: 1, max: 80 });
+  const lastName = readString(body, "lastName", { min: 1, max: 80 });
+  const legacyFullName = readString(body, "fullName", { min: 2, max: 120 });
+  const resolvedFirst = firstName ?? (legacyFullName ?? "");
+  const resolvedLast = lastName ?? "";
+  const fullName = resolvedFirst && resolvedLast
+    ? `${resolvedFirst} ${resolvedLast}`
+    : resolvedFirst || legacyFullName || "";
+  if (!fullName || fullName.length < 2) {
+    return { ok: false, message: "Please provide your name." };
+  }
   const email = requireEmail(
     readString(body, "email", { max: 180, required: true }),
   );
@@ -67,6 +74,8 @@ export async function createBooking(
     trip_id: resolvedTrip.tripId,
     destination_id: resolvedTrip.destinationId,
     customer_name: fullName,
+    customer_first_name: firstName ?? null,
+    customer_last_name: lastName ?? null,
     customer_email: email,
     customer_phone: phone,
     nationality,
@@ -91,7 +100,7 @@ export async function createBooking(
   };
 }
 
-// ── Stripe payment booking helpers ──────────────────────────────────────────
+// Stripe payment booking helpers.
 
 /**
  * Create a booking in payment_status='pending' before a Stripe Checkout session is created.
@@ -102,7 +111,8 @@ export async function createPaymentPendingBooking({
   tripId,
   destinationSlug,
   tripSlug,
-  fullName,
+  firstName,
+  lastName,
   email,
   phone,
   nationality,
@@ -116,7 +126,8 @@ export async function createPaymentPendingBooking({
   tripId: string;
   destinationSlug: string;
   tripSlug: string;
-  fullName: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   nationality?: string | null;
@@ -135,7 +146,9 @@ export async function createPaymentPendingBooking({
     .from("bookings")
     .insert({
       trip_id: tripId,
-      customer_name: fullName,
+      customer_name: `${firstName} ${lastName}`.trim(),
+      customer_first_name: firstName,
+      customer_last_name: lastName,
       customer_email: email,
       customer_phone: phone,
       nationality: nationality ?? null,
@@ -356,7 +369,7 @@ export async function getBookingPaymentForSuccessPage({
   return { status: (row.payment_status as "pending" | "failed" | "expired") ?? "not_found" };
 }
 
-// ── Shared helpers ───────────────────────────────────────────────────────────
+// Shared helpers.
 
 async function resolveOptionSessionId({
   optionSessionToken,

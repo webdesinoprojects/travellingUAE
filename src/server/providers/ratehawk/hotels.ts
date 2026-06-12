@@ -35,6 +35,13 @@ export const RATEHAWK_ENDPOINTS = {
   hotelPage: "/api/b2b/v3/search/hp/",
   /** Lock a specific rate; non-idempotent - must never auto-retry. */
   prebook: "/api/b2b/v3/hotel/prebook/",
+  /**
+   * HP-4B: Returns which guest fields are required for the final hotel order.
+   * Idempotent (read-only). VERIFY this path against GET /api/b2b/v3/overview/
+   * before going to production — the exact path was not confirmed from a live
+   * overview call at the time of writing.
+   */
+  bookingForm: "/api/b2b/v3/hotel/order/booking/form/",
 } as const;
 
 // Timeouts aligned with submitted RateHawk commitments.
@@ -1066,6 +1073,73 @@ function findPrebookRate(
   }
 
   return null;
+}
+
+// ---- Booking form check (HP-4B) --------------------------------------------
+
+/** One required/optional field returned by the booking form check endpoint. */
+export type HotelBookingFormField = {
+  /** Provider field type, e.g. "first_name", "last_name", "birth_date". */
+  type: string;
+  required: boolean;
+};
+
+export type HotelBookingFormDTO = {
+  fields: HotelBookingFormField[];
+  /** True when any field of type "birth_date" is marked required. */
+  requiresDob: boolean;
+};
+
+/**
+ * POST /api/b2b/v3/hotel/order/booking/form/
+ * Returns which guest fields are required for the specific prebook hash.
+ * Idempotent/read-only — safe to call multiple times.
+ * Returns null on any failure so the caller can fall back gracefully.
+ *
+ * IMPORTANT: The endpoint path must be verified against GET /api/b2b/v3/overview/
+ * for the active API key before this is used in the booking flow.
+ */
+export async function getHotelBookingForm(
+  prebookHash: string,
+  language = "en",
+  signal?: AbortSignal,
+): Promise<HotelBookingFormDTO | null> {
+  const hash = prebookHash.trim();
+  if (!hash) return null;
+
+  const lang = LANGUAGE_RE.test(language) ? language : "en";
+
+  try {
+    const response = await rateHawkRequest<unknown>(
+      RATEHAWK_ENDPOINTS.bookingForm,
+      {
+        method: "POST",
+        body: { hash, language: lang },
+        timeoutMs: 15_000,
+        idempotent: true,
+        signal,
+      },
+    );
+
+    const data = asRecord(response.data);
+    const rawFields = Array.isArray(data?.fields) ? (data.fields as unknown[]) : [];
+
+    const fields: HotelBookingFormField[] = rawFields
+      .map((entry) => {
+        const record = asRecord(entry);
+        const type = toCleanString(record?.type);
+        if (!type) return null;
+        return { type, required: record?.required === true };
+      })
+      .filter((f): f is HotelBookingFormField => f !== null);
+
+    return {
+      fields,
+      requiresDob: fields.some((f) => f.type === "birth_date" && f.required),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export { RateHawkError };

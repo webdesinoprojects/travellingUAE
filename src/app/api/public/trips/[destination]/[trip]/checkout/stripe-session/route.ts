@@ -61,7 +61,8 @@ export async function POST(
     }
 
     const body = await readJsonObject(request);
-    const fullName = readString(body, "fullName", { min: 2, max: 120, required: true })!;
+    const firstName = readString(body, "firstName", { min: 1, max: 80, required: true })!;
+    const lastName = readString(body, "lastName", { min: 1, max: 80, required: true })!;
     const email = requireEmail(readString(body, "email", { max: 180, required: true }));
     const phone = readString(body, "phone", { min: 5, max: 40, required: true })!;
     const nationality = readString(body, "nationality", { max: 80 });
@@ -75,7 +76,8 @@ export async function POST(
       tripId: summary.trip.id,
       destinationSlug: destination,
       tripSlug: trip,
-      fullName,
+      firstName,
+      lastName,
       email,
       phone,
       nationality,
