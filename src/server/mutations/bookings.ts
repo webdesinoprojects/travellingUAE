@@ -270,17 +270,23 @@ export async function updatePaymentStatusByBookingId({
   if (result.error) throw result.error;
 }
 
-type SuccessPagePaymentStatus =
-  | "paid"
-  | "pending"
-  | "failed"
-  | "expired"
-  | "not_found";
+export type SuccessPageResult =
+  | { status: "pending" | "failed" | "expired" | "not_found" }
+  | {
+      status: "paid";
+      reference: string;
+      customerName: string;
+      customerEmail: string;
+      paidAmount: number | null;
+      paidCurrency: string | null;
+      travelDate: string | null;
+      tripTitle: string;
+    };
 
 /**
  * Verify a Stripe session ID belongs to a booking for THIS specific trip/destination.
  * Prevents a valid Stripe session from a different trip from showing a success state.
- * Returns 'not_found' if the session is not in our DB or does not match the trip.
+ * Returns booking details when paid so the success page can show a proper confirmation.
  */
 export async function getBookingPaymentForSuccessPage({
   stripeSessionId,
@@ -290,41 +296,64 @@ export async function getBookingPaymentForSuccessPage({
   stripeSessionId: string;
   destinationSlug: string;
   tripSlug: string;
-}): Promise<SuccessPagePaymentStatus> {
+}): Promise<SuccessPageResult> {
   const supabase = getSupabaseAdminClient();
 
-  // Resolve trip ID from slugs to gate the booking lookup.
+  // Resolve trip ID and title from slugs to gate the booking lookup.
   const tripResult = await supabase
     .from("trips")
-    .select("id, destinations!inner(slug)")
+    .select("id, title, destinations!inner(slug)")
     .eq("slug", tripSlug)
     .maybeSingle();
 
   if (tripResult.error) throw tripResult.error;
-  if (!tripResult.data) return "not_found";
+  if (!tripResult.data) return { status: "not_found" };
 
   const trip = tripResult.data as {
     id: string;
+    title: string;
     destinations: { slug: string } | { slug: string }[];
   };
   const destSlug = Array.isArray(trip.destinations)
     ? trip.destinations[0]?.slug
     : trip.destinations.slug;
-  if (destSlug !== destinationSlug) return "not_found";
+  if (destSlug !== destinationSlug) return { status: "not_found" };
 
   // Look up booking by session ID AND trip ID - both must match.
   const bookingResult = await supabase
     .from("bookings")
-    .select("payment_status")
+    .select("id, payment_status, customer_name, customer_email, paid_amount, paid_currency, travel_date")
     .eq("stripe_checkout_session_id", stripeSessionId)
     .eq("trip_id", trip.id)
     .maybeSingle();
 
   if (bookingResult.error) throw bookingResult.error;
-  if (!bookingResult.data) return "not_found";
+  if (!bookingResult.data) return { status: "not_found" };
 
-  const row = bookingResult.data as { payment_status: string | null };
-  return (row.payment_status as SuccessPagePaymentStatus) ?? "not_found";
+  const row = bookingResult.data as {
+    id: string;
+    payment_status: string | null;
+    customer_name: string;
+    customer_email: string;
+    paid_amount: number | null;
+    paid_currency: string | null;
+    travel_date: string | null;
+  };
+
+  if (row.payment_status === "paid") {
+    return {
+      status: "paid",
+      reference: row.id.slice(-8).toUpperCase(),
+      customerName: row.customer_name,
+      customerEmail: row.customer_email,
+      paidAmount: row.paid_amount,
+      paidCurrency: row.paid_currency,
+      travelDate: row.travel_date,
+      tripTitle: trip.title,
+    };
+  }
+
+  return { status: (row.payment_status as "pending" | "failed" | "expired") ?? "not_found" };
 }
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
