@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/server/providers/ratehawk/booking/**/*.test.ts\"",
+    "test:typecheck": "tsc -p tsconfig.test.json --noEmit",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "supabase:status": "supabase status",
@@ -16,7 +18,10 @@
     "db:types": "supabase gen types typescript --local > src/types/supabase.ts",
     "db:types:linked": "supabase gen types typescript --linked > src/types/supabase.ts",
     "admin:bootstrap": "node scripts/bootstrap-admin.mjs",
-    "seed:home": "node scripts/seed-home-footer.mjs"
+    "seed:home": "node scripts/seed-home-footer.mjs",
+    "sync:ratehawk:full": "node scripts/sync-ratehawk-static-content.mjs full",
+    "sync:ratehawk:full:resume": "node scripts/sync-ratehawk-static-content.mjs full --resume",
+    "sync:ratehawk:incremental": "node scripts/sync-ratehawk-static-content.mjs incremental"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",

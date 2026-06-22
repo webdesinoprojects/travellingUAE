@@ -28,6 +28,8 @@ type Props = {
   tripPageHref: string;
   /** When provided, shows a "Pay with card" button that POSTs form data to this URL and redirects to Stripe. */
   stripeSessionPath?: string | null;
+  /** Formatted total payable, e.g. "SAR 6,500". Shown in the pay button when stripeSessionPath is set. */
+  checkoutAmountLabel?: string | null;
 };
 
 type FormState = "idle" | "submitting" | "success" | "error";
@@ -40,10 +42,10 @@ export function CheckoutForm({
   travelersCount,
   tripPageHref,
   stripeSessionPath,
+  checkoutAmountLabel,
 }: Props) {
   const [formState, setFormState] = useState<FormState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [travelers, setTravelers] = useState(travelersCount);
   const [payState, setPayState] = useState<PayState>("idle");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -63,7 +65,7 @@ export function CheckoutForm({
       phone: data.get("phone") as string,
       nationality: data.get("nationality") as string | undefined,
       travelDate: travelDate ?? undefined,
-      travelersCount: travelers,
+      travelersCount: travelersCount,
       message: data.get("message") as string | undefined,
     };
 
@@ -104,7 +106,7 @@ export function CheckoutForm({
       email: data.get("email"),
       phone: data.get("phone"),
       nationality: data.get("nationality"),
-      travelersCount: travelers,
+      travelersCount: travelersCount,
       message: data.get("message"),
     };
 
@@ -182,25 +184,20 @@ export function CheckoutForm({
       ))}
 
       <div>
-        <label
-          htmlFor="travelersCount"
-          className="block text-sm font-extrabold text-brand-navy dark:text-white"
-        >
-          Total party size <span className="ml-1 text-brand-blue dark:text-brand-sand">*</span>
-        </label>
-        <input
-          id="travelersCount"
-          name="travelersCount"
-          type="number"
-          min={1}
-          max={50}
-          value={travelers}
-          onChange={(e) => setTravelers(Math.max(1, parseInt(e.target.value, 10) || 1))}
-          required
-          className="mt-1.5 block h-11 w-full rounded-lg border border-border-soft bg-surface px-3.5 text-sm text-brand-navy outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:ring-brand-sand/30 dark:focus:border-brand-sand"
-        />
-        <p className="mt-1.5 text-xs text-brand-navy/50 dark:text-white/45">
-          For our travel team. Room price is fixed per the selected room type.
+        <p className="block text-sm font-extrabold text-brand-navy dark:text-white">
+          Total party size
+        </p>
+        <p className="mt-1.5 text-sm font-semibold text-brand-navy dark:text-white">
+          {travelersCount} {travelersCount === 1 ? "traveler" : "travelers"}
+        </p>
+        <p className="mt-1 text-xs text-brand-navy/50 dark:text-white/45">
+          Traveler count is locked from your selected package options.{" "}
+          <a
+            href={tripPageHref}
+            className="underline hover:text-brand-navy dark:hover:text-white"
+          >
+            Go back to change travelers.
+          </a>
         </p>
       </div>
 
@@ -261,7 +258,7 @@ export function CheckoutForm({
           <div className="flex items-center gap-3 py-1">
             <div className="h-px flex-1 bg-border-soft" />
             <span className="text-xs font-semibold text-brand-navy/40 dark:text-white/40">
-              or pay your hotel add-on now
+              or pay securely now
             </span>
             <div className="h-px flex-1 bg-border-soft" />
           </div>
@@ -280,7 +277,7 @@ export function CheckoutForm({
             ) : (
               <>
                 <CreditCard aria-hidden="true" className="size-4" />
-                Pay hotel add-on with card
+                {checkoutAmountLabel ? `Pay ${checkoutAmountLabel}` : "Pay and confirm booking"}
               </>
             )}
           </button>
@@ -293,8 +290,8 @@ export function CheckoutForm({
           ) : null}
 
           <p className="text-center text-xs text-brand-navy/55 dark:text-white/55">
-            Securely charged via Stripe. Pays only your selected hotel add-on.
-            No card details are stored by Fly Time.
+            Securely charged via Stripe. Full trip booking charged at the total
+            shown above. No card details are stored by Fly Time.
           </p>
         </>
       ) : null}

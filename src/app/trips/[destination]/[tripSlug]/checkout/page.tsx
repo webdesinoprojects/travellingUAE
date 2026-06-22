@@ -33,6 +33,10 @@ export async function generateMetadata({
   };
 }
 
+function formatAmount(amount: number, currency: string): string {
+  return `${currency} ${Math.round(amount).toLocaleString("en-US")}`;
+}
+
 export default async function CheckoutPage({
   params,
 }: {
@@ -52,7 +56,7 @@ export default async function CheckoutPage({
   ]);
 
   const stripeSessionPath =
-    summary && hasStripeEnv() && summary.totalDelta.amount > 0
+    summary && hasStripeEnv() && summary.pricing.totalPayable > 0
       ? `/api/public/trips/${destination}/${tripSlug}/checkout/stripe-session`
       : null;
 
@@ -89,6 +93,10 @@ export default async function CheckoutPage({
       </>
     );
   }
+
+  const checkoutAmountLabel = stripeSessionPath
+    ? formatAmount(summary.pricing.totalPayable, summary.pricing.currency)
+    : null;
 
   return (
     <>
@@ -128,6 +136,7 @@ export default async function CheckoutPage({
                   travelersCount={summary.travelersCount}
                   tripPageHref={tripPageHref}
                   stripeSessionPath={stripeSessionPath}
+                  checkoutAmountLabel={checkoutAmountLabel}
                 />
               </section>
             </div>
@@ -228,10 +237,12 @@ function OrderSummaryCard({
   stripeEnabled,
 }: {
   summary: CheckoutSummaryDTO;
-  pkg: { price: string; durationLabel: string };
+  pkg: { durationLabel: string };
   stripeEnabled: boolean;
 }) {
-  const hasExtras = summary.totalDelta.amount !== 0;
+  const { pricing } = summary;
+  const hasBasePrice = pricing.basePricePerTraveler > 0;
+  const hasOptions = pricing.selectedOptionsSubtotal !== 0;
 
   return (
     <aside className="lg:sticky lg:top-28 lg:self-start">
@@ -249,15 +260,23 @@ function OrderSummaryCard({
         </div>
 
         <div className="p-5">
-          <div className="flex items-center justify-between text-sm font-semibold">
-            <span className="text-brand-navy/70 dark:text-white/70">
-              Base package
-            </span>
-            <span className="font-extrabold">{pkg.price}</span>
-          </div>
+          {hasBasePrice ? (
+            <div className="flex items-start justify-between gap-3 text-sm font-semibold">
+              <span className="text-brand-navy/70 dark:text-white/70">
+                Base package
+                <span className="block text-xs font-normal text-brand-navy/50 dark:text-white/45">
+                  {formatAmount(pricing.basePricePerTraveler, pricing.currency)} &times; {pricing.travelersCount}{" "}
+                  {pricing.travelersCount === 1 ? "traveler" : "travelers"}
+                </span>
+              </span>
+              <span className="shrink-0 font-extrabold">
+                {formatAmount(pricing.baseSubtotal, pricing.currency)}
+              </span>
+            </div>
+          ) : null}
 
-          {hasExtras ? (
-            <div className="mt-3 flex items-center justify-between text-sm font-semibold">
+          {hasOptions ? (
+            <div className={`${hasBasePrice ? "mt-3" : ""} flex items-center justify-between text-sm font-semibold`}>
               <span className="text-brand-navy/70 dark:text-white/70">
                 Selected options
               </span>
@@ -266,6 +285,31 @@ function OrderSummaryCard({
               </span>
             </div>
           ) : null}
+
+          {!hasBasePrice && !hasOptions ? (
+            <div className="flex items-center justify-between text-sm font-semibold">
+              <span className="text-brand-navy/70 dark:text-white/70">Selected options</span>
+              <span className="font-extrabold text-brand-blue dark:text-brand-sand">
+                {summary.totalDelta.label}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="mt-4 border-t border-border-soft pt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-extrabold text-brand-navy dark:text-white">
+                Total due
+              </span>
+              <span className="text-lg font-black text-brand-blue dark:text-brand-sand">
+                {formatAmount(pricing.totalPayable, pricing.currency)}
+              </span>
+            </div>
+            {hasBasePrice && pricing.travelersCount > 1 ? (
+              <p className="mt-1 text-right text-xs text-brand-navy/50 dark:text-white/45">
+                {formatAmount(pricing.basePricePerTraveler, pricing.currency)} per person
+              </p>
+            ) : null}
+          </div>
 
           {summary.travelDate ? (
             <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-brand-navy/70 dark:text-white/70">
@@ -291,7 +335,7 @@ function OrderSummaryCard({
             </p>
             <p className="mt-1 text-xs leading-5 text-brand-navy/68 dark:text-white/68">
               {stripeEnabled
-                ? "Card payment is available for your selected hotel add-on. The base package remains handled by the travel desk."
+                ? "Secure card payment. Hotel rate is charged per room at the prebooked occupancy, not multiplied by traveler count."
                 : "No payment is taken now. Our travel team will confirm availability and send you payment details."}
             </p>
           </div>

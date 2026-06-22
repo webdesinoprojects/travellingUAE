@@ -1,0 +1,66 @@
+export type HotelGuestRoom = {
+  adults: number;
+  children: number[];
+};
+
+export type HotelSearchInput = {
+  destinationSlug?: string;
+  providerRegionId?: number;
+  destinationName?: string;
+  checkIn: string;
+  checkOut: string;
+  residency: string;
+  rooms: HotelGuestRoom[];
+  currency?: string;
+  language?: string;
+};
+
+export type HotelDestinationSuggestion = {
+  regionId: number;
+  name: string;
+  countryCode: string | null;
+  type: string;
+};
+
+export type HotelSearchCardDTO = {
+  quoteId: string;
+  hotelId: string;
+  name: string;
+  address: string | null;
+  imageUrl: string | null;
+  starRating: number | null;
+  roomName: string | null;
+  boardBasis: string | null;
+  priceAmount: number;
+  currency: string;
+  nights: number;
+};
+
+export type HotelSearchResultDTO = {
+  searchId: string;
+  destination: { slug: string; name: string };
+  checkIn: string;
+  checkOut: string;
+  rooms: HotelGuestRoom[];
+  residency: string;
+  expiresAt: string;
+  hotels: HotelSearchCardDTO[];
+};
+
+export type HotelRateDTO = {
+  rateId: string;
+  roomName: string | null;
+  boardBasis: string | null;
+  priceAmount: number;
+  currency: string;
+};
+
+export type HotelDetailDTO = {
+  searchId: string;
+  hotel: Omit<HotelSearchCardDTO, "quoteId">;
+  checkIn: string;
+  checkOut: string;
+  rooms: HotelGuestRoom[];
+  rates: HotelRateDTO[];
+  expiresAt: string;
+};

@@ -222,7 +222,7 @@ export function HeroSearch({
   return (
     <section
       id="travel-search"
-      className="mt-8 max-w-5xl scroll-mt-28 rounded-lg border border-white/22 bg-white/14 p-3 backdrop-blur-xl"
+      className="mt-8 w-full scroll-mt-28 rounded-lg border border-white/22 bg-white/14 p-3 backdrop-blur-xl"
       aria-label="Travel search"
     >
       <div
@@ -282,7 +282,7 @@ export function HeroSearch({
       {selectedService === "flight" ? (
         <HeroFlightSearch destinations={destinations} />
       ) : selectedService === "hotel" ? (
-        <HeroHotelSearch destinations={destinations} />
+        <HeroHotelSearch />
       ) : selectedService === "packages" ? (
         <HeroPackagesSearch destinations={destinations} />
       ) : selectedService === "hajj-umrah" ? (

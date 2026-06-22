@@ -3,7 +3,6 @@
 import {
   CalendarDays,
   ChevronDown,
-  MapPin,
   Minus,
   Plus,
   Search,
@@ -15,10 +14,16 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
 } from "react";
+import { getCountryOptions } from "@/data/countries";
+import {
+  HotelDestinationCombobox,
+  type HotelDestinationSelection,
+} from "@/components/hotels/HotelDestinationCombobox";
 
 type Room = {
   id: string;
@@ -27,39 +32,74 @@ type Room = {
   infantAges: number[];
 };
 
-type HeroHotelSearchProps = {
-  destinations: Array<{ slug: string; name: string }>;
-};
-
-const MAX_ROOMS = 6;
-const MAX_PER_ROOM = 9;
+const MAX_ROOMS = 4;
+const MAX_ADULTS_PER_ROOM = 6;
+const MAX_CHILDREN_PER_ROOM = 4;
 const CHILD_AGE_OPTIONS = Array.from({ length: 10 }, (_, index) => index + 2); // 2..11
 const INFANT_AGE_OPTIONS = [0, 1];
 
-export function HeroHotelSearch({ destinations }: HeroHotelSearchProps) {
+export function HeroHotelSearch() {
   const router = useRouter();
-  const [destination, setDestination] = useState("");
+  const [destination, setDestination] =
+    useState<HotelDestinationSelection | null>(null);
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [rooms, setRooms] = useState<Room[]>(() => [createRoom()]);
+  const [residency, setResidency] = useState("ae");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const totals = roomTotals(rooms);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const params = new URLSearchParams({
-      service: "hotel",
-      rooms: String(rooms.length),
-      adults: String(totals.adults),
-      children: String(totals.children),
-      infants: String(totals.infants),
-    });
+    setError(null);
 
-    if (destination) params.set("destination", destination);
-    if (checkIn) params.set("checkIn", checkIn);
-    if (checkOut) params.set("checkOut", checkOut);
+    if (!destination || !checkIn || !checkOut) {
+      setError("Choose a destination, check-in date, and check-out date.");
+      return;
+    }
 
-    router.push(`/?${params.toString()}#contact`);
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/public/hotels/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          providerRegionId: destination.regionId,
+          destinationName: destination.name,
+          checkIn,
+          checkOut,
+          residency,
+          rooms: rooms.map((room) => ({
+            adults: room.adults,
+            children: [...room.infantAges, ...room.childAges],
+          })),
+          currency: "SAR",
+          language: "en",
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        data?: { searchId?: string };
+        message?: string;
+      };
+
+      if (!response.ok || !payload.ok || !payload.data?.searchId) {
+        throw new Error(payload.message || "Hotel search is unavailable.");
+      }
+
+      router.push(`/hotels?search=${encodeURIComponent(payload.data.searchId)}`);
+    } catch (caught) {
+      setError(
+        caught instanceof Error && caught.message
+          ? caught.message
+          : "We could not search hotels right now. Please try again.",
+      );
+      setIsSubmitting(false);
+    }
   }
 
   function addRoom() {
@@ -87,11 +127,7 @@ export function HeroHotelSearch({ destinations }: HeroHotelSearchProps) {
       className="grid min-w-0 gap-3"
     >
       <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_auto]">
-        <DestinationSelect
-          value={destination}
-          options={destinations}
-          onChange={setDestination}
-        />
+        <HotelDestinationCombobox value={destination} onChange={setDestination} />
         <DateRangeField
           checkIn={checkIn}
           checkOut={checkOut}
@@ -101,52 +137,27 @@ export function HeroHotelSearch({ destinations }: HeroHotelSearchProps) {
         <TravelerPopover
           label={travellerLabel(rooms.length, totals)}
           rooms={rooms}
+          residency={residency}
+          onResidencyChange={setResidency}
           onAdd={addRoom}
           onRemove={removeRoom}
           onUpdate={updateRoom}
         />
         <button
           type="submit"
-          className="flex min-h-14 items-center justify-center gap-2 rounded-lg bg-brand-blue px-6 text-sm font-extrabold uppercase tracking-[0.1em] text-white shadow-[0_16px_34px_rgb(18_63_118/0.32)] transition hover:-translate-y-0.5 hover:bg-brand-navy dark:bg-brand-sand dark:text-white dark:hover:bg-brand-sand/90"
+          disabled={isSubmitting}
+          className="flex min-h-14 items-center justify-center gap-2 rounded-lg bg-brand-blue px-6 text-sm font-extrabold uppercase tracking-[0.1em] text-white shadow-[0_16px_34px_rgb(18_63_118/0.32)] transition hover:-translate-y-0.5 hover:bg-brand-navy disabled:cursor-wait disabled:opacity-65 dark:bg-brand-sand dark:text-white dark:hover:bg-brand-sand/90"
         >
           <Search aria-hidden="true" className="size-4" />
-          Search now
+          {isSubmitting ? "Searching..." : "Search now"}
         </button>
       </div>
+      {error ? (
+        <p role="alert" className="rounded-lg bg-red-950/80 px-4 py-3 text-sm font-bold text-white">
+          {error}
+        </p>
+      ) : null}
     </form>
-  );
-}
-
-function DestinationSelect({
-  value,
-  options,
-  onChange,
-}: {
-  value: string;
-  options: HeroHotelSearchProps["destinations"];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="flex min-h-14 min-w-0 items-center gap-3 rounded-lg bg-white/94 px-4 text-brand-navy">
-      <MapPin aria-hidden="true" className="size-5 text-brand-blue" />
-      <span className="min-w-0 flex-1">
-        <span className="block text-[11px] font-bold uppercase text-brand-blue/70">
-          Destination
-        </span>
-        <select
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="block w-full appearance-none truncate bg-transparent text-sm font-extrabold outline-none"
-        >
-          <option value="">Select destination</option>
-          {options.map((option) => (
-            <option key={option.slug} value={option.slug}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-      </span>
-    </label>
   );
 }
 
@@ -196,17 +207,22 @@ function DateRangeField({
 function TravelerPopover({
   label,
   rooms,
+  residency,
+  onResidencyChange,
   onAdd,
   onRemove,
   onUpdate,
 }: {
   label: string;
   rooms: Room[];
+  residency: string;
+  onResidencyChange: (value: string) => void;
   onAdd: () => void;
   onRemove: (id: string) => void;
   onUpdate: (id: string, patch: Partial<Omit<Room, "id">>) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const countries = useMemo(() => getCountryOptions("en"), []);
   const containerRef = useRef<HTMLDivElement>(null);
   const popoverId = useId();
 
@@ -234,7 +250,7 @@ function TravelerPopover({
 
   const handleAdults = useCallback(
     (room: Room, delta: number) => {
-      const next = clamp(room.adults + delta, 1, MAX_PER_ROOM);
+      const next = clamp(room.adults + delta, 1, MAX_ADULTS_PER_ROOM);
       onUpdate(room.id, { adults: next });
     },
     [onUpdate],
@@ -242,7 +258,11 @@ function TravelerPopover({
 
   const handleChildren = useCallback(
     (room: Room, delta: number) => {
-      const nextCount = clamp(room.childAges.length + delta, 0, MAX_PER_ROOM);
+      const nextCount = clamp(
+        room.childAges.length + delta,
+        0,
+        MAX_CHILDREN_PER_ROOM - room.infantAges.length,
+      );
       const nextAges = resizeAges(room.childAges, nextCount, 2);
       onUpdate(room.id, { childAges: nextAges });
     },
@@ -251,7 +271,11 @@ function TravelerPopover({
 
   const handleInfants = useCallback(
     (room: Room, delta: number) => {
-      const nextCount = clamp(room.infantAges.length + delta, 0, MAX_PER_ROOM);
+      const nextCount = clamp(
+        room.infantAges.length + delta,
+        0,
+        MAX_CHILDREN_PER_ROOM - room.childAges.length,
+      );
       const nextAges = resizeAges(room.infantAges, nextCount, 0);
       onUpdate(room.id, { infantAges: nextAges });
     },
@@ -288,6 +312,23 @@ function TravelerPopover({
           aria-label="Choose rooms and travellers"
           className="absolute right-0 top-[calc(100%+0.5rem)] z-30 grid max-h-[70vh] w-[min(92vw,360px)] gap-4 overflow-y-auto rounded-lg border border-brand-blue/10 bg-white p-4 text-brand-navy shadow-2xl"
         >
+          <label className="grid gap-1.5">
+            <span className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-brand-blue/70">
+              Lead guest passport country
+            </span>
+            <select
+              value={residency}
+              onChange={(event) => onResidencyChange(event.target.value)}
+              className="h-11 rounded-lg border border-brand-blue/20 bg-white px-3 text-sm font-extrabold text-brand-navy outline-none focus:border-brand-blue"
+            >
+              {countries.map((country) => (
+                <option key={country.code} value={country.code}>
+                  {country.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
           {rooms.map((room, index) => (
             <RoomCard
               key={room.id}

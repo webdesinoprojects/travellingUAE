@@ -77,7 +77,12 @@ export default async function RootLayout({
     currentLocale.code,
     "common",
   );
-  const localizedNavItems = localizeNavigation(navItems, commonTranslations);
+  const localizedNavItems = localizeNavigation(
+    navItems.filter(
+      (item) => item.label !== "Wellness" && item.label !== "Journal",
+    ),
+    commonTranslations,
+  );
   const headerCopy = {
     enquire: readPublicMessage(
       commonTranslations,

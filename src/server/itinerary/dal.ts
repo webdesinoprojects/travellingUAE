@@ -27,9 +27,11 @@ import {
   type GuestRoom,
   type HotelPrebookResult,
 } from "@/server/providers/ratehawk/hotels";
+import { getLocalHotelContent } from "@/server/hotels/content";
 import type {
   ActivityOptionDTO,
   CheckoutLineItem,
+  CheckoutPricing,
   CheckoutSummaryDTO,
   FlightOptionDTO,
   HotelOptionDTO,
@@ -48,7 +50,10 @@ const SESSION_TTL_SECONDS = 45 * 60;
 
 // RateHawk live hotel options (HP-2).
 const RATEHAWK_PROVIDER_SLUG = "ratehawk-hotel";
-const LIVE_OPTION_TTL_MS = 30 * 60 * 1000;
+// SERP quotes are browsing hints only. Keep reuse short and always run
+// hotelpage + prebook before selection; hotelpage/prebook responses are never
+// cached.
+const LIVE_OPTION_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LIVE_RESIDENCY = "ae";
 const DEFAULT_LIVE_NIGHTS = 2;
 const LIVE_OPTION_LIMIT = 12;
@@ -74,6 +79,7 @@ type TripContext = {
   destinationName: string;
   currency: string;
   startDate?: string;
+  priceAmount: number;
 };
 
 type SegmentRow = {
@@ -462,7 +468,7 @@ async function getTripContext(
   };
   const tripResult = await supabase
     .from("trips")
-    .select("id,slug,title,currency,start_date")
+    .select("id,slug,title,currency,start_date,price_amount")
     .eq("destination_id", destination.id)
     .eq("slug", tripSlug)
     .eq("status", "published")
@@ -482,6 +488,7 @@ async function getTripContext(
     title: string;
     currency: string;
     start_date: string | null;
+    price_amount: number | string | null;
   };
 
   return {
@@ -492,6 +499,7 @@ async function getTripContext(
     destinationName: destination.name,
     currency: trip.currency,
     startDate: trip.start_date ?? undefined,
+    priceAmount: Number.isFinite(Number(trip.price_amount)) ? Number(trip.price_amount) : 0,
   };
 }
 
@@ -794,6 +802,34 @@ function deriveStayDates(context: TripContext, config: HotelSourceConfig) {
 }
 
 function parseLiveGuests(searchParams: URLSearchParams) {
+  const encodedRooms = searchParams.getAll("room").slice(0, 4);
+  const rooms = encodedRooms
+    .map((encoded) => {
+      const [adultsPart, childrenPart = ""] = encoded.split(":", 2);
+      const adults = Number.parseInt(adultsPart, 10);
+      const children = childrenPart
+        .split(",")
+        .filter(Boolean)
+        .map((part) => Number.parseInt(part, 10));
+
+      if (
+        !Number.isInteger(adults) ||
+        adults < 1 ||
+        adults > 6 ||
+        children.length > 4 ||
+        children.some((age) => !Number.isInteger(age) || age < 0 || age > 17)
+      ) {
+        return null;
+      }
+
+      return { adults, children };
+    })
+    .filter((room): room is { adults: number; children: number[] } => room !== null);
+
+  if (rooms.length === encodedRooms.length && rooms.length > 0) {
+    return rooms;
+  }
+
   const adultsRaw = Number.parseInt(searchParams.get("adults") ?? "2", 10);
   const adults =
     Number.isInteger(adultsRaw) && adultsRaw >= 1 && adultsRaw <= 6
@@ -806,6 +842,19 @@ function parseLiveGuests(searchParams: URLSearchParams) {
     .slice(0, 4);
 
   return [{ adults, children }];
+}
+
+function parseLiveResidency(
+  searchParams: URLSearchParams,
+  configuredResidency: string | null,
+) {
+  const requested = searchParams.get("residency")?.trim().toLowerCase();
+
+  if (requested && /^[a-z]{2}$/.test(requested)) {
+    return requested;
+  }
+
+  return configuredResidency ?? DEFAULT_LIVE_RESIDENCY;
 }
 
 async function getOrCreateRateHawkProviderId(): Promise<string | null> {
@@ -874,7 +923,7 @@ async function getLiveHotelOptions(
       regionId: config.regionId,
       checkin,
       checkout,
-      residency: config.residency ?? DEFAULT_LIVE_RESIDENCY,
+      residency: parseLiveResidency(searchParams, config.residency),
       guests: parseLiveGuests(searchParams),
       currency: context.currency,
       language: "en",
@@ -915,7 +964,9 @@ async function getLiveHotelOptions(
       return reuseRows.map(mapLiveHotelRow);
     }
 
-    const quotes = await buildLiveHotelQuotes(searchInput);
+    const quotes = await buildLiveHotelQuotes(searchInput, (hotelIds) =>
+      getLocalHotelContent(providerId, hotelIds, searchInput.language ?? "en"),
+    );
 
     if (quotes.length === 0) {
       return [];
@@ -2135,6 +2186,23 @@ export async function getCheckoutSummary({
     });
   }
 
+  const totalDeltaAmount = Number(sess.total_delta_amount ?? 0);
+  const basePricePerTraveler = tripCtx.priceAmount;
+  const travelersCount = sess.travelers_count;
+  const baseSubtotal = basePricePerTraveler * travelersCount;
+  const selectedOptionsSubtotal = totalDeltaAmount;
+  const totalPayable = baseSubtotal + selectedOptionsSubtotal;
+  const pricingCurrency = sess.currency || tripCtx.currency;
+
+  const pricing: CheckoutPricing = {
+    basePricePerTraveler,
+    travelersCount,
+    baseSubtotal,
+    selectedOptionsSubtotal,
+    totalPayable,
+    currency: pricingCurrency,
+  };
+
   return {
     trip: {
       id: tripCtx.tripId,
@@ -2146,11 +2214,9 @@ export async function getCheckoutSummary({
     },
     selections,
     travelDate: sess.travel_date ?? undefined,
-    travelersCount: sess.travelers_count,
-    totalDelta: moneyDelta(
-      Number(sess.total_delta_amount ?? 0),
-      sess.currency || tripCtx.currency,
-    ),
+    travelersCount,
+    totalDelta: moneyDelta(totalDeltaAmount, pricingCurrency),
+    pricing,
     expiresAt: sess.expires_at,
   };
 }

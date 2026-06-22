@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { jsonError, jsonOk, logServerError } from "@/server/http/response";
 import { getSegmentOptionsDTO } from "@/server/itinerary/dal";
+import { consumeProviderRateLimit } from "@/server/security/provider-rate-limit";
 import type { ItineraryOptionType } from "@/types/itinerary";
 
 export async function GET(
@@ -15,6 +16,11 @@ export async function GET(
 
     if (!segmentId || !isOptionType(type)) {
       return jsonError(400, "Please choose a valid option type.");
+    }
+
+    if (type === "hotel") {
+      const limited = await enforceProviderLimit(request);
+      if (limited) return limited;
     }
 
     const data = await getSegmentOptionsDTO({
@@ -34,6 +40,25 @@ export async function GET(
     logServerError("api.public.trip.options", error);
     return jsonError(500);
   }
+}
+
+async function enforceProviderLimit(request: Request) {
+  const limit = await consumeProviderRateLimit({
+    request,
+    routeKey: "trip-hotel-options",
+    limit: 20,
+    windowSeconds: 60,
+  });
+
+  if (limit.allowed) return null;
+
+  return jsonError(
+    limit.unavailable ? 503 : 429,
+    limit.unavailable
+      ? "Hotel search is temporarily unavailable. Please try again shortly."
+      : "Too many hotel searches. Please wait a moment and try again.",
+    { headers: { "Retry-After": String(limit.retryAfterSeconds) } },
+  );
 }
 
 function isOptionType(value: string | null): value is ItineraryOptionType {

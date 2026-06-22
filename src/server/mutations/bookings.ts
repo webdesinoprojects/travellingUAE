@@ -120,8 +120,9 @@ export async function createPaymentPendingBooking({
   travelDate,
   message,
   optionSessionToken,
-  optionAddOnAmount,
-  optionAddOnCurrency,
+  totalPayableAmount,
+  totalPayableCurrency,
+  pricingSnapshot,
 }: {
   tripId: string;
   destinationSlug: string;
@@ -135,9 +136,18 @@ export async function createPaymentPendingBooking({
   travelDate?: string;
   message?: string | null;
   optionSessionToken?: string;
-  /** The option add-on amount being charged (delta-only, NOT the full trip price). */
-  optionAddOnAmount: number;
-  optionAddOnCurrency: string;
+  /** Full trip total payable (base x travelers + option deltas). */
+  totalPayableAmount: number;
+  totalPayableCurrency: string;
+  pricingSnapshot: {
+    basePricePerTraveler: number;
+    travelersCount: number;
+    baseSubtotal: number;
+    selectedOptionsSubtotal: number;
+    totalPayable: number;
+    currency: string;
+    selectedSegmentIds?: string[];
+  };
 }): Promise<string> {
   const supabase = getSupabaseAdminClient();
   const optionSessionId = await resolveOptionSessionId({ optionSessionToken, tripId });
@@ -159,12 +169,12 @@ export async function createPaymentPendingBooking({
       payment_status: "pending",
       metadata: {
         source: "stripe_checkout",
-        // SP-1 charges only the option add-on (hotel delta), not the full trip base price.
-        charge_type: "option_add_on",
-        planned_charge_amount: optionAddOnAmount,
-        planned_charge_currency: optionAddOnCurrency,
+        charge_type: "full_trip",
+        planned_charge_amount: totalPayableAmount,
+        planned_charge_currency: totalPayableCurrency,
         destinationSlug,
         tripSlug,
+        pricing_snapshot: pricingSnapshot,
       },
     })
     .select("id")

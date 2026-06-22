@@ -30,26 +30,27 @@ export const RATEHAWK_ENDPOINTS = {
   overview: "/api/b2b/v3/overview/",
   multicomplete: "/api/b2b/v3/search/multicomplete/",
   serpRegion: "/api/b2b/v3/search/serp/region/",
-  hotelInfo: "/api/b2b/v3/hotel/info/",
   /** Single-hotel availability recheck; used before prebook to get book_hash. */
   hotelPage: "/api/b2b/v3/search/hp/",
   /** Lock a specific rate; non-idempotent - must never auto-retry. */
   prebook: "/api/b2b/v3/hotel/prebook/",
-  /**
-   * HP-4B: Returns which guest fields are required for the final hotel order.
-   * Idempotent (read-only). VERIFY this path against GET /api/b2b/v3/overview/
-   * before going to production — the exact path was not confirmed from a live
-   * overview call at the time of writing.
-   */
-  bookingForm: "/api/b2b/v3/hotel/order/booking/form/",
 } as const;
+
+// Final booking/order endpoints live in `./booking/contracts.ts`
+// (BOOKING_ENDPOINTS). They are NOT defined or callable from this module: the
+// create-booking-process call is side-effecting and must only run through the
+// flag-gated booking state machine. The previous `getHotelBookingForm()` helper
+// was removed because it called booking/form (which CREATES a booking process)
+// as if it were idempotent field discovery. See
+// dev/ratehawk-booking-doc-verification.md.
 
 // Timeouts aligned with submitted RateHawk commitments.
 const SEARCH_TIMEOUT_MS = 30_000;
 const SUGGEST_TIMEOUT_MS = 10_000;
 const OVERVIEW_TIMEOUT_MS = 8_000;
-// Prebook is non-idempotent; shorter timeout so the UX doesn't hang.
-const PREBOOK_TIMEOUT_MS = 15_000;
+// ETG recommends 60 seconds for prebook (30 seconds minimum). It remains
+// non-idempotent and is never retried automatically.
+const PREBOOK_TIMEOUT_MS = 60_000;
 
 // ---- Public DTOs -----------------------------------------------------------
 
@@ -321,23 +322,6 @@ export function mapMealToBoardBasis(meal: string | null): string | undefined {
     default:
       return "No Meal";
   }
-}
-
-/**
- * Replaces the ETG `{size}` template token in a static image URL with a
- * concrete size. Returns null if the value is not a usable https URL.
- */
-function buildStaticImageUrl(
-  template: string | null,
-  size = "640x400",
-): string | null {
-  if (!template) {
-    return null;
-  }
-
-  const url = template.replace("{size}", size);
-
-  return url.startsWith("https://") ? url : null;
 }
 
 // ---- In-memory search cache (5-minute browse cache per commitments) --------
@@ -731,70 +715,6 @@ export async function searchRegionRatesDetailed(
     .filter((entry): entry is RegionRateDetail => entry !== null);
 }
 
-export type HotelStaticInfo = {
-  hotelId: string;
-  name: string;
-  starRating: number | null;
-  imageUrl: string | null;
-  address: string | null;
-  latitude: number | null;
-  longitude: number | null;
-};
-
-/**
- * POST /api/b2b/v3/hotel/info/
- * Best-effort static content (name, star, image, address) for one hotel.
- * Returns null on any failure so it never blocks a live search.
- */
-export async function getHotelStaticInfo(
-  hotelId: string,
-  language = "en",
-  signal?: AbortSignal,
-): Promise<HotelStaticInfo | null> {
-  const id = hotelId.trim();
-
-  if (!id || id.length > 120) {
-    return null;
-  }
-
-  const lang = LANGUAGE_RE.test(language) ? language : "en";
-
-  try {
-    const response = await rateHawkRequest<unknown>(
-      RATEHAWK_ENDPOINTS.hotelInfo,
-      {
-        method: "POST",
-        body: { id, language: lang },
-        timeoutMs: SUGGEST_TIMEOUT_MS,
-        idempotent: true,
-        signal,
-      },
-    );
-
-    const data = asRecord(response.data);
-    const name = toCleanString(data?.name);
-
-    if (!data || !name) {
-      return null;
-    }
-
-    const images = asArray(data.images);
-    const firstImage = images.length > 0 ? toCleanString(images[0]) : null;
-
-    return {
-      hotelId: id,
-      name,
-      starRating: toFiniteNumber(data.star_rating),
-      imageUrl: buildStaticImageUrl(firstImage),
-      address: toCleanString(data.address),
-      latitude: toFiniteNumber(data.latitude),
-      longitude: toFiniteNumber(data.longitude),
-    };
-  } catch {
-    return null;
-  }
-}
-
 // ---- Hotelpage (single-hotel availability recheck) -------------------------
 
 export type HotelPageParams = {
@@ -1073,73 +993,6 @@ function findPrebookRate(
   }
 
   return null;
-}
-
-// ---- Booking form check (HP-4B) --------------------------------------------
-
-/** One required/optional field returned by the booking form check endpoint. */
-export type HotelBookingFormField = {
-  /** Provider field type, e.g. "first_name", "last_name", "birth_date". */
-  type: string;
-  required: boolean;
-};
-
-export type HotelBookingFormDTO = {
-  fields: HotelBookingFormField[];
-  /** True when any field of type "birth_date" is marked required. */
-  requiresDob: boolean;
-};
-
-/**
- * POST /api/b2b/v3/hotel/order/booking/form/
- * Returns which guest fields are required for the specific prebook hash.
- * Idempotent/read-only — safe to call multiple times.
- * Returns null on any failure so the caller can fall back gracefully.
- *
- * IMPORTANT: The endpoint path must be verified against GET /api/b2b/v3/overview/
- * for the active API key before this is used in the booking flow.
- */
-export async function getHotelBookingForm(
-  prebookHash: string,
-  language = "en",
-  signal?: AbortSignal,
-): Promise<HotelBookingFormDTO | null> {
-  const hash = prebookHash.trim();
-  if (!hash) return null;
-
-  const lang = LANGUAGE_RE.test(language) ? language : "en";
-
-  try {
-    const response = await rateHawkRequest<unknown>(
-      RATEHAWK_ENDPOINTS.bookingForm,
-      {
-        method: "POST",
-        body: { hash, language: lang },
-        timeoutMs: 15_000,
-        idempotent: true,
-        signal,
-      },
-    );
-
-    const data = asRecord(response.data);
-    const rawFields = Array.isArray(data?.fields) ? (data.fields as unknown[]) : [];
-
-    const fields: HotelBookingFormField[] = rawFields
-      .map((entry) => {
-        const record = asRecord(entry);
-        const type = toCleanString(record?.type);
-        if (!type) return null;
-        return { type, required: record?.required === true };
-      })
-      .filter((f): f is HotelBookingFormField => f !== null);
-
-    return {
-      fields,
-      requiresDob: fields.some((f) => f.type === "birth_date" && f.required),
-    };
-  } catch {
-    return null;
-  }
 }
 
 export { RateHawkError };

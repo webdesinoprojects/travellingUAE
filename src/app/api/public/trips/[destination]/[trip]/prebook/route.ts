@@ -1,6 +1,7 @@
 import { jsonError, jsonOk, logServerError } from "@/server/http/response";
 import { readJsonObject, readString } from "@/server/http/validation";
 import { prebookLiveHotelOption } from "@/server/itinerary/dal";
+import { consumeProviderRateLimit } from "@/server/security/provider-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,23 @@ export async function POST(
   context: { params: Promise<{ destination: string; trip: string }> },
 ) {
   try {
+    const limit = await consumeProviderRateLimit({
+      request,
+      routeKey: "hotel-prebook",
+      limit: 10,
+      windowSeconds: 60,
+    });
+
+    if (!limit.allowed) {
+      return jsonError(
+        limit.unavailable ? 503 : 429,
+        limit.unavailable
+          ? "Room confirmation is temporarily unavailable. Please try again shortly."
+          : "Too many room confirmation attempts. Please wait a moment and try again.",
+        { headers: { "Retry-After": String(limit.retryAfterSeconds) } },
+      );
+    }
+
     const { destination, trip } = await context.params;
     const body = await readJsonObject(request);
     const segmentId = readString(body, "segmentId", { required: true, max: 80 });

@@ -24,8 +24,15 @@ export function jsonOk<T>(data: T, init?: ResponseInit) {
   );
 }
 
-export function jsonError(status = 400, message = GENERIC_PUBLIC_ERROR) {
-  return NextResponse.json<ApiFailure>({ ok: false, message }, { status });
+export function jsonError(
+  status = 400,
+  message = GENERIC_PUBLIC_ERROR,
+  init?: Omit<ResponseInit, "status">,
+) {
+  return NextResponse.json<ApiFailure>(
+    { ok: false, message },
+    { status, headers: init?.headers },
+  );
 }
 
 export function logServerError(scope: string, error: unknown) {

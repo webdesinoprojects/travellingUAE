@@ -167,6 +167,15 @@ export type CheckoutLineItem = {
   nights?: number | null;
 };
 
+export type CheckoutPricing = {
+  basePricePerTraveler: number;
+  travelersCount: number;
+  baseSubtotal: number;
+  selectedOptionsSubtotal: number;
+  totalPayable: number;
+  currency: string;
+};
+
 export type CheckoutSummaryDTO = {
   trip: {
     id: string;
@@ -180,6 +189,7 @@ export type CheckoutSummaryDTO = {
   travelDate?: string;
   travelersCount: number;
   totalDelta: MoneyDelta;
+  pricing: CheckoutPricing;
   expiresAt: string;
 };
 

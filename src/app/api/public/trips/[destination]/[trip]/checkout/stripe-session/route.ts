@@ -22,9 +22,11 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * SP-1 scope: charges only the selected option add-on amount (hotel room delta),
- * NOT the full base trip price. The base trip is handled separately via the enquiry flow.
- * This is intentional - the live hotel option is the only confirmed-price item at this stage.
+ * Charges the full trip totalPayable:
+ *   base package price x travelers + sum of selected option deltas.
+ *
+ * The RateHawk hotel rate is charged at the prebooked room amount (fixed,
+ * not multiplied by traveler count; occupancy is set at search/prebook time).
  */
 export async function POST(
   request: Request,
@@ -52,12 +54,12 @@ export async function POST(
       return jsonError(404, "Your selection has expired or is not found.");
     }
 
-    // SP-1 charges the option add-on delta only (live hotel room surcharge above the base trip).
-    const optionAddOnAmount = summary.totalDelta.amount;
-    const optionAddOnCurrency = summary.totalDelta.currency;
+    const { pricing } = summary;
+    const totalPayable = pricing.totalPayable;
+    const currency = pricing.currency;
 
-    if (optionAddOnAmount <= 0) {
-      return jsonError(400, "No chargeable option add-on for this selection.");
+    if (totalPayable <= 0) {
+      return jsonError(400, "No payable amount for this selection.");
     }
 
     const body = await readJsonObject(request);
@@ -66,10 +68,32 @@ export async function POST(
     const email = requireEmail(readString(body, "email", { max: 180, required: true }));
     const phone = readString(body, "phone", { min: 5, max: 40, required: true })!;
     const nationality = readString(body, "nationality", { max: 80 });
-    const travelersCount = Math.round(
-      readNumber(body, "travelersCount", { min: 1, max: 50, fallback: 1 }) ?? 1,
-    );
+    // Use the server-authoritative travelersCount from the locked session.
+    // If the client submits a value, validate it matches — mismatch means a
+    // stale form or tampered request; reject rather than silently mischarge.
+    const bodyTravelersCount = readNumber(body, "travelersCount", { min: 1, max: 50 });
+    if (
+      bodyTravelersCount != null &&
+      Math.round(bodyTravelersCount) !== pricing.travelersCount
+    ) {
+      return jsonError(400, "Invalid request. Please refresh the page and try again.");
+    }
+    const travelersCount = pricing.travelersCount;
     const message = readString(body, "message", { max: 2000 });
+
+    // Segment IDs identify which selections are included (safe, no provider hashes).
+    // Prebook snapshot links are stored on the selection rows themselves.
+    const selectedSegmentIds = summary.selections.map((s) => s.segmentId);
+
+    const pricingSnapshot = {
+      basePricePerTraveler: pricing.basePricePerTraveler,
+      travelersCount: pricing.travelersCount,
+      baseSubtotal: pricing.baseSubtotal,
+      selectedOptionsSubtotal: pricing.selectedOptionsSubtotal,
+      totalPayable: pricing.totalPayable,
+      currency,
+      selectedSegmentIds,
+    };
 
     // Create booking first so we have a stable ID to pass to Stripe metadata.
     bookingId = await createPaymentPendingBooking({
@@ -85,32 +109,32 @@ export async function POST(
       travelDate: summary.travelDate,
       message,
       optionSessionToken: sessionToken,
-      optionAddOnAmount,
-      optionAddOnCurrency,
+      totalPayableAmount: totalPayable,
+      totalPayableCurrency: currency,
+      pricingSnapshot,
     });
 
     const stripe = getStripe();
     const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
-    const currency = optionAddOnCurrency.toLowerCase();
+    const stripeCurrency = currency.toLowerCase();
 
-    // Label clearly as option add-on so Stripe's receipt matches what was described to the customer.
+    const lineItemName = `${summary.trip.title} - Trip Booking`;
     const optionLabels = summary.selections
       .map((s) => s.optionLabel)
       .slice(0, 3)
       .join(", ");
-    const lineItemName = `Hotel add-on - ${summary.trip.title}`;
 
     const stripeSession = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [
         {
           price_data: {
-            currency,
+            currency: stripeCurrency,
             product_data: {
               name: lineItemName,
               description: optionLabels || undefined,
             },
-            unit_amount: toStripeAmount(optionAddOnAmount, currency),
+            unit_amount: toStripeAmount(totalPayable, stripeCurrency),
           },
           quantity: 1,
         },
@@ -122,7 +146,7 @@ export async function POST(
       metadata: {
         booking_id: bookingId,
         trip_id: summary.trip.id,
-        charge_type: "option_add_on",
+        charge_type: "full_trip",
       },
       payment_intent_data: {
         metadata: { booking_id: bookingId },
@@ -148,7 +172,6 @@ export async function POST(
     logServerError("api.public.trip.checkout.stripe-session", error);
 
     // If we created a booking but failed before linking the Stripe session, cancel it.
-    // Leaves no orphaned 'pending' rows with no associated session.
     if (bookingId) {
       await cancelOrphanBooking(bookingId);
     }

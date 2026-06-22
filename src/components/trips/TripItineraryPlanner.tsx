@@ -16,7 +16,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import {
+  createDefaultHotelOccupancy,
+  HotelOccupancyFields,
+  serializeHotelRoom,
+  totalHotelGuests,
+  type HotelOccupancy,
+} from "@/components/hotels/HotelOccupancyFields";
 import type {
   ActivityOptionDTO,
   FlightOptionDTO,
@@ -66,6 +73,7 @@ type OptionPanelState = {
 
 const OPTION_ERROR =
   "We could not load these options right now. Please try again.";
+const OPTION_CACHE_TTL_MS = 4 * 60 * 1000;
 
 const segmentIconMap: Record<ItinerarySegmentDTO["type"], LucideIcon> = {
   flight: Plane,
@@ -89,7 +97,26 @@ export function TripItineraryPlanner({
   const [panel, setPanel] = useState<OptionPanelState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [hasMadeSelection, setHasMadeSelection] = useState(false);
+  const [occupancy, setOccupancy] = useState(createDefaultHotelOccupancy);
+  const [occupancyLocked, setOccupancyLocked] = useState(false);
+  const optionCache = useRef(
+    new Map<string, { options: SegmentOptionDTO[]; loadedAt: number }>(),
+  );
   const summary = useMemo(() => buildTimelineSummary(segments), [segments]);
+  const travelersCount = useMemo(
+    () => totalHotelGuests(occupancy),
+    [occupancy],
+  );
+
+  function updateOccupancy(value: HotelOccupancy) {
+    if (occupancyLocked) return;
+
+    setOccupancy(value);
+    optionCache.current.clear();
+    setPanel(null);
+    setHasMadeSelection(false);
+    setNotice("Guest details changed. Reconfirm your hotel before checkout.");
+  }
 
   async function openOptions(segment: ItinerarySegmentDTO) {
     if (!isOptionType(segment.type)) {
@@ -123,6 +150,25 @@ export function TripItineraryPlanner({
       return;
     }
 
+    const cacheKey = buildOptionCacheKey(segment, occupancy, query, sort);
+    const cached = optionCache.current.get(cacheKey);
+
+    if (cached && Date.now() - cached.loadedAt < OPTION_CACHE_TTL_MS) {
+      setPanel((current) =>
+        current && current.segment.id === segment.id
+          ? {
+              ...current,
+              options: cached.options,
+              query,
+              sort,
+              isLoading: false,
+              error: undefined,
+            }
+          : current,
+      );
+      return;
+    }
+
     setPanel((current) =>
       current && current.segment.id === segment.id
         ? { ...current, isLoading: true, error: undefined, query, sort }
@@ -135,6 +181,13 @@ export function TripItineraryPlanner({
         type: segment.type,
         sort,
       });
+
+      if (segment.type === "hotel") {
+        searchParams.set("residency", occupancy.residency);
+        occupancy.rooms.forEach((room) =>
+          searchParams.append("room", serializeHotelRoom(room)),
+        );
+      }
 
       if (query.trim()) {
         if (segment.type === "hotel") {
@@ -151,6 +204,11 @@ export function TripItineraryPlanner({
       const data = await fetchJson<SegmentOptionsDTO>(
         `/api/public/trips/${destinationSlug}/${tripSlug}/options?${searchParams.toString()}`,
       );
+
+      optionCache.current.set(cacheKey, {
+        options: data.options,
+        loadedAt: Date.now(),
+      });
 
       setPanel((current) =>
         current && current.segment.id === segment.id
@@ -300,7 +358,7 @@ export function TripItineraryPlanner({
           optionType: panel.segment.type,
           optionId: option.id,
           travelDate: itinerary.trip.startDate,
-          travelersCount: 2,
+          travelersCount,
           ...(prebookId != null ? { prebookId } : {}),
         }),
       });
@@ -314,6 +372,9 @@ export function TripItineraryPlanner({
       );
       setTotalDelta(result.totalDelta);
       setHasMadeSelection(true);
+      if (option.type === "hotel") {
+        setOccupancyLocked(true);
+      }
       setNotice("Your package option has been updated.");
       setPanel(null);
     } catch {
@@ -353,6 +414,32 @@ export function TripItineraryPlanner({
             {notice}
           </div>
         ) : null}
+      </div>
+
+      <div className="modern-card mt-6 rounded-lg p-4 sm:p-5">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:items-start">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-blue dark:text-brand-sand">
+              Hotel occupancy
+            </p>
+            <h3 className="mt-2 text-xl font-extrabold text-brand-navy dark:text-white">
+              Who is staying?
+            </h3>
+            <p className="mt-2 max-w-md text-sm leading-6 text-brand-navy/62 dark:text-white/62">
+              Set rooms, adult guests, child ages and the lead guest&apos;s passport country before loading live hotel rates.
+            </p>
+            {occupancyLocked ? (
+              <p className="mt-3 text-xs font-bold text-brand-blue dark:text-brand-sand">
+                Guest details are locked after hotel confirmation so the prebooked rate remains valid.
+              </p>
+            ) : null}
+          </div>
+          <HotelOccupancyFields
+            value={occupancy}
+            onChange={updateOccupancy}
+            disabled={occupancyLocked}
+          />
+        </div>
       </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -446,6 +533,27 @@ export function TripItineraryPlanner({
       />
     </section>
   );
+}
+
+function buildOptionCacheKey(
+  segment: ItinerarySegmentDTO,
+  occupancy: HotelOccupancy,
+  query: string,
+  sort: string,
+) {
+  const rooms =
+    segment.type === "hotel"
+      ? occupancy.rooms.map(serializeHotelRoom).join("|")
+      : "";
+
+  return [
+    segment.id,
+    segment.type,
+    query.trim().toLowerCase(),
+    sort,
+    occupancy.residency,
+    rooms,
+  ].join(":");
 }
 
 function SegmentCard({

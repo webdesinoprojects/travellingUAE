@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Scratch/transcript files kept only for manual reference.
+    "dev/unsuable-del-later/**",
   ]),
 ]);
 

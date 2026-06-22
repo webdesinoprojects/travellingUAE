@@ -32,7 +32,6 @@ export const navItems: NavItem[] = [
       { label: "Hajj & Umrah", href: "/hajj-umrah" },
     ],
   },
-  { label: "Wellness", href: "/?service=wellness#travel-search" },
   {
     label: "Travel Desk",
     href: "/?service=transfers#travel-search",
@@ -46,16 +45,13 @@ export const navItems: NavItem[] = [
     ],
   },
   { label: "Hajj & Umrah", href: "/hajj-umrah" },
-  { label: "Journal", href: "/journal" },
 ];
 
 export const primarySearchServices: HeroTab[] = [
   { label: "Flights", icon: "flight", service: "flight" },
   { label: "Hotel", icon: "hotel", service: "hotel" },
   { label: "Packages", icon: "package", service: "packages" },
-  { label: "Wellness", icon: "wellness", service: "wellness" },
   { label: "Hajj & Umrah", icon: "hajj", service: "hajj-umrah" },
-  { label: "Visa", icon: "visa", service: "visa" },
 ];
 
 export const moreSearchServices: HeroTab[] = [

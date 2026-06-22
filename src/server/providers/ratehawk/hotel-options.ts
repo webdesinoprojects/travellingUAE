@@ -3,12 +3,12 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import {
-  getHotelStaticInfo,
   mapMealToBoardBasis,
   searchRegionRatesDetailed,
   type GuestRoom,
   type HotelSearchParams,
 } from "./hotels";
+import type { LocalHotelContent } from "@/server/hotels/content";
 
 /**
  * Orchestrates a live RateHawk hotel search into safe, displayable quotes for
@@ -75,11 +75,14 @@ export function buildRequestHash(input: LiveHotelSearchInput): string {
     })),
   };
 
-  return createHash("sha1").update(JSON.stringify(normalized)).digest("hex");
+  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
 
 export async function buildLiveHotelQuotes(
   input: LiveHotelSearchInput,
+  loadContent: (
+    hotelIds: string[],
+  ) => Promise<Map<string, LocalHotelContent>>,
 ): Promise<LiveHotelQuote[]> {
   const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
 
@@ -97,25 +100,17 @@ export async function buildLiveHotelQuotes(
 
   const rates = await searchRegionRatesDetailed(params);
 
-  // Cheapest first, then take the bounded set we will enrich + display.
+  // Sort all bounded SERP results before joining local static content. A newly
+  // added provider hotel can be absent from the latest dump, so filtering
+  // before applying the UI limit avoids returning an unnecessarily empty list.
   const cheapest = rates
     .filter((rate) => rate.priceAmount > 0)
-    .sort((a, b) => a.priceAmount - b.priceAmount)
-    .slice(0, limit);
+    .sort((a, b) => a.priceAmount - b.priceAmount);
 
-  const enriched = await Promise.all(
-    cheapest.map(async (rate) => {
-      const info = await getHotelStaticInfo(
-        rate.hotelId,
-        input.language ?? "en",
-        input.signal,
-      );
-
-      // Require a usable display name; skip content-poor hotels for now
-      // (full static-content sync is HP-5).
-      if (!info) {
-        return null;
-      }
+  const localContent = await loadContent(cheapest.map((rate) => rate.hotelId));
+  const enriched = cheapest.map((rate) => {
+      const info = localContent.get(rate.hotelId);
+      if (!info) return null;
 
       const quote: LiveHotelQuote = {
         hid: rate.hid,
@@ -135,8 +130,9 @@ export async function buildLiveHotelQuotes(
       };
 
       return quote;
-    }),
-  );
+    });
 
-  return enriched.filter((quote): quote is LiveHotelQuote => quote !== null);
+  return enriched
+    .filter((quote): quote is LiveHotelQuote => quote !== null)
+    .slice(0, limit);
 }
