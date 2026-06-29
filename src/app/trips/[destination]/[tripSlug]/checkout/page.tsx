@@ -137,6 +137,7 @@ export default async function CheckoutPage({
                   tripPageHref={tripPageHref}
                   stripeSessionPath={stripeSessionPath}
                   checkoutAmountLabel={checkoutAmountLabel}
+                  hotelOccupancy={summary.hotelOccupancy}
                 />
               </section>
             </div>

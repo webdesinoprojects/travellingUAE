@@ -25,6 +25,25 @@
 -- NOT applied yet. Apply order is documented in docs/sql-run-order.md. No ETG
 -- order is created by any code in this slice; the booking feature flag is off.
 
+-- 0. Selection status consumed by the booking DAL ---------------------------
+-- The booking DAL resolves the prebook hash via
+--   trip_option_selections WHERE session_id = ? AND status = 'selected'
+-- but trip_option_selections (created in 20260508090000) had no status column.
+-- Add it here, ahead of any booking code that depends on it. Default 'selected'
+-- so every existing selection row (always a live selection) classifies correctly.
+alter table public.trip_option_selections
+  add column if not exists status text not null default 'selected';
+
+alter table public.trip_option_selections
+  drop constraint if exists trip_option_selections_status_check;
+
+alter table public.trip_option_selections
+  add constraint trip_option_selections_status_check
+  check (status in ('selected', 'dismissed', 'expired'));
+
+create index if not exists trip_option_selections_session_status_idx
+  on public.trip_option_selections(session_id, status);
+
 -- 1. Widen the provider booking-process state machine on bookings ------------
 
 alter table public.bookings
@@ -64,7 +83,12 @@ alter table public.bookings
   add column if not exists provider_last_status_at  timestamptz,   -- last status poll/update
   add column if not exists provider_status_version  integer not null default 0, -- optimistic lock
   add column if not exists provider_confirmed_at    timestamptz,
-  add column if not exists provider_cancelled_at    timestamptz;
+  add column if not exists provider_cancelled_at    timestamptz,
+  -- Create Booking response (booking/form): sanitized payment_types and the
+  -- gender-requirement flag. provider_payment_types holds ONLY type/amount/
+  -- currency_code + need-card flags; NEVER card data, hashes, or PII.
+  add column if not exists provider_payment_types   jsonb,
+  add column if not exists provider_is_gender_specification_required boolean;
 
 alter table public.bookings
   drop constraint if exists bookings_provider_payment_type_check;
@@ -146,8 +170,13 @@ create table if not exists public.provider_booking_jobs (
   run_after timestamptz not null default now(),
   attempts integer not null default 0,
   max_attempts integer not null default 10,
-  lease_owner text,
-  leased_until timestamptz,
+  -- Lease fields. A job is claimable only when status='queued' AND run_after<=now,
+  -- OR its lease has expired (status='leased' AND leased_until<now) after a crash.
+  -- Only the service role (server worker) may claim/mutate jobs (RLS: editor read
+  -- only; service role bypasses RLS).
+  lease_owner text,                -- locked_by: claiming worker id
+  leased_until timestamptz,        -- locked_until: lease expiry
+  locked_at timestamptz,           -- when the current lease was taken
   last_error_code text,            -- sanitized short slug only; never a payload
   partner_order_id text,            -- current attempt id; never a provider hash
   attempt_id uuid,                  -- links to provider_booking_attempts(id)

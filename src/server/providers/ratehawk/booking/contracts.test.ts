@@ -24,6 +24,9 @@ import {
   isValidPartnerOrderId,
   nextBookingState,
   normalizeSignal,
+  buildBookingRooms,
+  parseCreateBookingResponse,
+  selectPaymentType,
   BookingContractError,
 } from "./contracts.ts";
 
@@ -99,9 +102,12 @@ test("finish: every documented terminal code -> failed", () => {
 
 // ---- Check booking process -------------------------------------------------
 
-test("status: ok and completed -> success", () => {
+test("status: ok -> success (check-booking-process poll value)", () => {
   assert.deepEqual(classifyBookingStatus(sig({ status: "ok" })), { kind: "success" });
-  assert.deepEqual(classifyBookingStatus(sig({ status: "completed" })), { kind: "success" });
+});
+
+test("status: 'completed' is NOT a poll success value (it is the webhook spelling) -> unknown", () => {
+  assert.deepEqual(classifyBookingStatus(sig({ status: "completed" })), { kind: "unknown" });
 });
 
 test("status: processing -> poll", () => {
@@ -129,10 +135,8 @@ test("status: every documented terminal code -> failed (incl 3ds as error)", () 
 
 // ---- Webhook ---------------------------------------------------------------
 
-test("webhook: confirmed/completed/ok -> success", () => {
-  for (const status of ["confirmed", "completed", "ok"]) {
-    assert.deepEqual(classifyWebhookStatus(sig({ status })), { kind: "success" }, status);
-  }
+test("webhook: only 'completed' is success (endpoint-contract value)", () => {
+  assert.deepEqual(classifyWebhookStatus(sig({ status: "completed" })), { kind: "success" });
 });
 
 test("webhook: failed -> failed", () => {
@@ -140,6 +144,14 @@ test("webhook: failed -> failed", () => {
     kind: "failed",
     code: "failed",
   });
+});
+
+test("webhook: 'ok' is NOT webhook success (it is a finish/status polling value)", () => {
+  assert.deepEqual(classifyWebhookStatus(sig({ status: "ok" })), { kind: "unknown" });
+});
+
+test("webhook: 'confirmed' is NOT accepted until ETG confirms the spelling", () => {
+  assert.deepEqual(classifyWebhookStatus(sig({ status: "confirmed" })), { kind: "unknown" });
 });
 
 test("webhook: unknown value -> unknown", () => {
@@ -277,11 +289,11 @@ test("buildCreateBookingRequest rejects bad partner id and missing fields", () =
   );
 });
 
-test("buildStartBookingRequest maps rooms/guests and hotel payment", () => {
+test("buildStartBookingRequest uses official nested shape (partner/payment_type/supplier_data)", () => {
   const body = buildStartBookingRequest({
-    partnerOrderId: "po-1",
+    partner: { partnerOrderId: "po-1", amountSellB2b2c: "120.00" },
     language: "en",
-    userEmail: "guest@example.com",
+    user: { email: "guest@example.com", phone: "+15551234567" },
     rooms: [
       { guests: [{ firstName: "Martin", lastName: "Smith" }] },
       {
@@ -291,9 +303,26 @@ test("buildStartBookingRequest maps rooms/guests and hotel payment", () => {
         ],
       },
     ],
-    paymentType: "hotel",
+    payment: { type: "hotel", amount: "40.85", currencyCode: "EUR" },
+    supplierData: { firstNameOriginal: "Martin", lastNameOriginal: "Smith", email: "guest@example.com" },
   });
-  assert.equal((body.payment_type as { type: string }).type, "hotel");
+
+  // partner_order_id is NESTED under partner, never top-level.
+  assert.equal((body.partner as { partner_order_id: string }).partner_order_id, "po-1");
+  assert.equal((body.partner as { amount_sell_b2b2c: string }).amount_sell_b2b2c, "120.00");
+  assert.equal("partner_order_id" in body, false);
+
+  // payment_type resends the complete selected entry.
+  assert.deepEqual(body.payment_type, { type: "hotel", amount: "40.85", currency_code: "EUR" });
+
+  // user + supplier_data.
+  assert.deepEqual(body.user, { email: "guest@example.com", phone: "+15551234567" });
+  assert.deepEqual(body.supplier_data, {
+    first_name_original: "Martin",
+    last_name_original: "Smith",
+    email: "guest@example.com",
+  });
+
   const rooms = body.rooms as Array<{ guests: Array<Record<string, unknown>> }>;
   assert.equal(rooms.length, 2);
   assert.deepEqual(rooms[0].guests[0], { first_name: "Martin", last_name: "Smith" });
@@ -303,41 +332,148 @@ test("buildStartBookingRequest maps rooms/guests and hotel payment", () => {
     is_child: true,
     age: 7,
   });
-  assert.ok(!("return_path" in body));
 });
 
-test("buildStartBookingRequest requires 3ds fields for payment 'now'", () => {
+test("buildStartBookingRequest puts return_path inside payment_type for 'now'", () => {
   assert.throws(
     () =>
       buildStartBookingRequest({
-        partnerOrderId: "po-1",
+        partner: { partnerOrderId: "po-1" },
         language: "en",
-        userEmail: "g@example.com",
+        user: { email: "g@example.com" },
         rooms: [{ guests: [{ firstName: "A", lastName: "B" }] }],
-        paymentType: "now",
+        payment: { type: "now", amount: "40.85", currencyCode: "EUR" },
       }),
     BookingContractError,
   );
   const ok = buildStartBookingRequest({
-    partnerOrderId: "po-1",
+    partner: { partnerOrderId: "po-1" },
     language: "en",
-    userEmail: "g@example.com",
+    user: { email: "g@example.com" },
     rooms: [{ guests: [{ firstName: "A", lastName: "B" }] }],
-    paymentType: "now",
-    returnPath: "https://flytime.example/return",
-    payUuid: "pay-1",
-    initUuid: "init-1",
+    payment: {
+      type: "now",
+      amount: "40.85",
+      currencyCode: "EUR",
+      returnPath: "https://flytime.example/return",
+      initUuid: "init-1",
+    },
   });
-  assert.equal(ok.return_path, "https://flytime.example/return");
-  assert.equal(ok.pay_uuid, "pay-1");
-  assert.equal(ok.init_uuid, "init-1");
+  const pt = ok.payment_type as Record<string, unknown>;
+  assert.equal(pt.return_path, "https://flytime.example/return");
+  assert.equal(pt.init_uuid, "init-1");
+  // No top-level 3DS fields.
+  assert.equal("return_path" in ok, false);
 });
 
-test("status/cancel/order-info builders shape the body", () => {
+test("buildStartBookingRequest rejects placeholder guest names", () => {
+  assert.throws(
+    () =>
+      buildStartBookingRequest({
+        partner: { partnerOrderId: "po-1" },
+        language: "en",
+        user: { email: "g@example.com" },
+        rooms: [{ guests: [{ firstName: "Guest", lastName: "Guest" }] }],
+        payment: { type: "hotel", amount: "10.00", currencyCode: "EUR" },
+      }),
+    BookingContractError,
+  );
+});
+
+// ---- buildBookingRooms (exact occupancy, no fabrication) -------------------
+
+test("buildBookingRooms preserves adults, child ages and room grouping exactly", () => {
+  const rooms = buildBookingRooms(
+    [
+      { adults: 2, childrenAges: [] },
+      { adults: 1, childrenAges: [7] },
+    ],
+    [
+      { firstName: "Martin", lastName: "Smith" },
+      { firstName: "Eliot", lastName: "Smith" },
+      { firstName: "Olga", lastName: "Jordan" },
+      { firstName: "Ben", lastName: "Button" },
+    ],
+  );
+  assert.equal(rooms.length, 2);
+  assert.equal(rooms[0].guests.length, 2);
+  assert.equal(rooms[1].guests.length, 2);
+  // The child keeps its age + is_child flag and stays in room 2.
+  assert.deepEqual(rooms[1].guests[1], {
+    firstName: "Ben",
+    lastName: "Button",
+    isChild: true,
+    age: 7,
+  });
+  assert.equal(rooms[1].guests[0].isChild, undefined);
+});
+
+test("buildBookingRooms rejects when collected names cannot cover every occupant", () => {
+  assert.throws(
+    () => buildBookingRooms([{ adults: 2, childrenAges: [] }], [{ firstName: "Solo", lastName: "Guest" }]),
+    BookingContractError,
+  );
+});
+
+test("buildBookingRooms rejects empty occupancy and bad child ages", () => {
+  assert.throws(() => buildBookingRooms([], []), BookingContractError);
+  assert.throws(
+    () => buildBookingRooms([{ adults: 1, childrenAges: [25] }], [{ firstName: "A", lastName: "B" }, { firstName: "C", lastName: "D" }]),
+    BookingContractError,
+  );
+});
+
+// ---- parseCreateBookingResponse -------------------------------------------
+
+test("parseCreateBookingResponse extracts ids, payment_types, gender flag (no card data)", () => {
+  const parsed = parseCreateBookingResponse({
+    order_id: 123456789,
+    item_id: 32165487,
+    is_gender_specification_required: true,
+    payment_types: [
+      { type: "hotel", amount: "40.85", currency_code: "EUR", is_need_credit_card_data: false, is_need_cvc: false },
+      { type: "now", amount: "40.85", currency_code: "EUR", is_need_credit_card_data: true, is_need_cvc: true },
+    ],
+  });
+  assert.equal(parsed.orderId, "123456789");
+  assert.equal(parsed.itemId, "32165487");
+  assert.equal(parsed.isGenderSpecificationRequired, true);
+  assert.equal(parsed.paymentTypes.length, 2);
+  assert.equal(parsed.paymentTypes[1].isNeedCreditCardData, true);
+  // No card fields are carried through.
+  const serialized = JSON.stringify(parsed);
+  assert.ok(!serialized.toLowerCase().includes("card_number"));
+});
+
+test("parseCreateBookingResponse is defensive on garbage", () => {
+  assert.deepEqual(parseCreateBookingResponse(null), {
+    orderId: null,
+    itemId: null,
+    paymentTypes: [],
+    isGenderSpecificationRequired: false,
+  });
+});
+
+test("selectPaymentType returns the matching entry or null", () => {
+  const types = [
+    { type: "hotel", amount: "1", currencyCode: "EUR", isNeedCreditCardData: false, isNeedCvc: false },
+  ];
+  assert.deepEqual(selectPaymentType(types, "hotel"), { type: "hotel", amount: "1", currencyCode: "EUR" });
+  assert.equal(selectPaymentType(types, "now"), null);
+});
+
+test("status/cancel builders shape the body", () => {
   assert.deepEqual(buildBookingStatusRequest("po-1"), { partner_order_id: "po-1" });
   assert.deepEqual(buildCancelRequest("po-1"), { partner_order_id: "po-1" });
-  assert.deepEqual(buildOrderInfoRequest("po-1"), {
-    ordering: { partner_order_ids: ["po-1"] },
-  });
   assert.throws(() => buildBookingStatusRequest(""), BookingContractError);
+});
+
+test("order-info request body matches ETG docs (search.partner_order_ids + ordering + pagination)", () => {
+  assert.deepEqual(buildOrderInfoRequest("po-1"), {
+    ordering: { ordering_type: "desc", ordering_by: "created_at" },
+    pagination: { page_size: 1, page_number: 1 },
+    search: { partner_order_ids: ["po-1"] },
+    language: "en",
+  });
+  assert.throws(() => buildOrderInfoRequest(""), BookingContractError);
 });

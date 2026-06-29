@@ -13,6 +13,7 @@ import {
   hasSupabaseAdminEnv,
 } from "@/server/supabase/client";
 import { hashSelectionSessionToken } from "@/server/itinerary/dal";
+import type { ValidatedCheckoutGuestRoom } from "@/server/providers/ratehawk/booking/checkout-guests";
 
 import type { MutationResult } from "@/server/mutations/newsletter";
 
@@ -123,6 +124,8 @@ export async function createPaymentPendingBooking({
   totalPayableAmount,
   totalPayableCurrency,
   pricingSnapshot,
+  trustedUserIp,
+  checkoutGuestRooms,
 }: {
   tripId: string;
   destinationSlug: string;
@@ -148,6 +151,8 @@ export async function createPaymentPendingBooking({
     currency: string;
     selectedSegmentIds?: string[];
   };
+  trustedUserIp?: string | null;
+  checkoutGuestRooms?: ValidatedCheckoutGuestRoom[] | null;
 }): Promise<string> {
   const supabase = getSupabaseAdminClient();
   const optionSessionId = await resolveOptionSessionId({ optionSessionToken, tripId });
@@ -175,6 +180,10 @@ export async function createPaymentPendingBooking({
         destinationSlug,
         tripSlug,
         pricing_snapshot: pricingSnapshot,
+        ...(trustedUserIp ? { user_ip: trustedUserIp } : {}),
+        ...(checkoutGuestRooms && checkoutGuestRooms.length > 0
+          ? { checkout_guest_rooms: checkoutGuestRooms }
+          : {}),
       },
     })
     .select("id")

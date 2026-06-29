@@ -176,6 +176,21 @@ export type CheckoutPricing = {
   currency: string;
 };
 
+export type CheckoutGuestGender = "male" | "female" | "unknown";
+
+export type CheckoutGuestOccupant = {
+  kind: "adult" | "child";
+  age?: number;
+  firstName?: string;
+  lastName?: string;
+  gender?: CheckoutGuestGender;
+};
+
+export type CheckoutGuestRoom = {
+  roomIndex: number;
+  guests: CheckoutGuestOccupant[];
+};
+
 export type CheckoutSummaryDTO = {
   trip: {
     id: string;
@@ -190,6 +205,7 @@ export type CheckoutSummaryDTO = {
   travelersCount: number;
   totalDelta: MoneyDelta;
   pricing: CheckoutPricing;
+  hotelOccupancy?: CheckoutGuestRoom[];
   expiresAt: string;
 };
 

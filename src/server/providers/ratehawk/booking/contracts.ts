@@ -122,11 +122,9 @@ export const STATUS_TERMINAL_CODES: ReadonlySet<string> = new Set([
   "booking_finish_did_not_succeed",
 ]);
 
-/** Success spellings: webhook uses `confirmed`, finish/status uses `completed`. */
+/** Check-booking-process success status. Webhook success uses `completed` separately. */
 export const SUCCESS_STATUS_VALUES: ReadonlySet<string> = new Set([
   "ok",
-  "completed",
-  "confirmed",
 ]);
 
 // ---- Normalized provider signal + classification ---------------------------
@@ -274,13 +272,30 @@ export function classifyBookingStatus(
   return { kind: "unknown" };
 }
 
-/** Receive booking status webhook. */
+/**
+ * Receive booking status webhook.
+ *
+ * The webhook reports the FINAL booking status. Per the verified ETG docs, the
+ * documented completion states are exactly `completed` (success) and `failed`.
+ * This classifier therefore accepts ONLY those two spellings:
+ *   - `completed` -> success
+ *   - `failed`    -> failed
+ *   - anything else (including `ok`, `confirmed`, `processing`) -> unknown
+ *
+ * `ok` is the Check-booking-process (finish/status) polling value, NOT a webhook
+ * value, so it must not be treated as webhook success.
+ *
+ * DOCS QUESTION (open, for ETG): our earlier handoff claimed the webhook sends
+ * `confirmed`, but the live endpoint contract documents `completed`. Until ETG
+ * confirms in writing that this exact callback can send `confirmed`, we DO NOT
+ * accept `confirmed` as success here. See dev/ratehawk-booking-doc-verification.md.
+ */
 export function classifyWebhookStatus(
   signal: ProviderResponseSignal,
 ): BookingClassification {
   const status = norm(signal.status);
 
-  if (status && (status === "confirmed" || status === "completed" || status === "ok")) {
+  if (status === "completed") {
     return { kind: "success" };
   }
 
@@ -405,6 +420,7 @@ export function nextBookingState(
 export type GuestName = {
   firstName: string;
   lastName: string;
+  gender?: "male" | "female" | "unknown";
   /** Child age; set only for child occupants. */
   age?: number;
   isChild?: boolean;
@@ -422,17 +438,62 @@ export type CreateBookingInput = {
   userIp: string;
 };
 
-export type StartBookingInput = {
-  partnerOrderId: string;
-  language: string;
-  userEmail: string;
-  userComment?: string;
-  rooms: RoomGuests[];
-  paymentType: PaymentType;
-  /** Only for `now`: redirect target after 3DS. */
-  returnPath?: string;
-  payUuid?: string;
+/** One room's occupancy, preserved exactly from the searched/prebooked rate. */
+export type RoomOccupancy = {
+  adults: number;
+  /** Child ages (years). Length = number of children in the room. */
+  childrenAges: number[];
+};
+
+/**
+ * One `payment_types[]` entry returned by Create Booking, sanitized (no card
+ * data). The chosen entry is resent verbatim (type/amount/currency_code) on
+ * Start Booking. `is_need_credit_card_data`/`is_need_cvc` flags drive the `now`
+ * card-token flow (not implemented in this slice).
+ */
+export type ParsedPaymentType = {
+  type: string;
+  amount: string;
+  currencyCode: string;
+  isNeedCreditCardData: boolean;
+  isNeedCvc: boolean;
+};
+
+/** Parsed, non-secret view of the Create Booking (booking/form) response. */
+export type CreateBookingResponse = {
+  orderId: string | null;
+  itemId: string | null;
+  paymentTypes: ParsedPaymentType[];
+  isGenderSpecificationRequired: boolean;
+};
+
+/** The payment_type entry resent on Start Booking (one of create's payment_types). */
+export type SelectedPaymentType = {
+  type: string;
+  amount: string;
+  currencyCode: string;
+  /** Documented inside payment_type for `now`/3DS rates only. */
   initUuid?: string;
+  returnPath?: string;
+};
+
+/** `supplier_data` block. Only real, collected values are sent; never invented. */
+export type SupplierData = {
+  firstNameOriginal?: string;
+  lastNameOriginal?: string;
+  phone?: string;
+  email?: string;
+};
+
+export type StartBookingInput = {
+  /** ETG nests partner_order_id under `partner` (NOT top-level). */
+  partner: { partnerOrderId: string; comment?: string; amountSellB2b2c?: string };
+  language: string;
+  user: { email: string; comment?: string; phone?: string };
+  rooms: RoomGuests[];
+  /** One complete payment_types entry returned by Create Booking, resent. */
+  payment: SelectedPaymentType;
+  supplierData?: SupplierData;
 };
 
 export class BookingContractError extends Error {
@@ -486,15 +547,38 @@ export function buildCreateBookingRequest(
   };
 }
 
-/** Build the start-booking-process request body. Pure assembler. */
+/** Names ETG must never receive: empty or the placeholder "guest". */
+const PLACEHOLDER_GUEST_NAMES: ReadonlySet<string> = new Set(["guest", "n/a", "na"]);
+
+function assertRealGuestName(label: string, value: unknown): string {
+  const v = assertNonEmpty(label, value).trim();
+  if (PLACEHOLDER_GUEST_NAMES.has(v.toLowerCase())) {
+    throw new BookingContractError(`${label} must be a real guest name, not a placeholder`);
+  }
+  return v;
+}
+
+/**
+ * Build the Start-booking-process (`booking/finish/`) request body.
+ *
+ * Exact ETG-compliant shape (verified against the official endpoint):
+ *   - `partner.partner_order_id` (NESTED, not top-level), optional comment /
+ *     amount_sell_b2b2c.
+ *   - `payment_type` = one complete `payment_types` entry from Create Booking,
+ *     resent as { type, amount, currency_code } (+ init_uuid / return_path inside
+ *     payment_type for `now`/3DS rates).
+ *   - `supplier_data` with documented fields, included only when real values
+ *     exist (never invented).
+ *   - `user` { email, comment?, phone? } and `rooms[].guests[]` with real names.
+ */
 export function buildStartBookingRequest(
   input: StartBookingInput,
 ): Record<string, unknown> {
-  if (!isValidPartnerOrderId(input.partnerOrderId)) {
-    throw new BookingContractError("partnerOrderId must be 1-256 chars");
+  if (!isValidPartnerOrderId(input.partner?.partnerOrderId)) {
+    throw new BookingContractError("partner.partnerOrderId must be 1-256 chars");
   }
   assertNonEmpty("language", input.language);
-  assertNonEmpty("userEmail", input.userEmail);
+  assertNonEmpty("user.email", input.user?.email);
 
   if (!Array.isArray(input.rooms) || input.rooms.length === 0) {
     throw new BookingContractError("at least one room is required");
@@ -507,12 +591,13 @@ export function buildStartBookingRequest(
 
     return {
       guests: room.guests.map((g) => {
-        assertNonEmpty("guest.firstName", g.firstName);
-        assertNonEmpty("guest.lastName", g.lastName);
         const guest: Record<string, unknown> = {
-          first_name: g.firstName,
-          last_name: g.lastName,
+          first_name: assertRealGuestName("guest.firstName", g.firstName),
+          last_name: assertRealGuestName("guest.lastName", g.lastName),
         };
+        if (g.gender) {
+          guest.gender = g.gender;
+        }
         if (g.isChild) {
           guest.is_child = true;
           if (typeof g.age === "number") {
@@ -524,29 +609,185 @@ export function buildStartBookingRequest(
     };
   });
 
+  // payment_type: resend the selected create-booking entry verbatim.
+  assertNonEmpty("payment.type", input.payment?.type);
+  assertNonEmpty("payment.amount", input.payment.amount);
+  assertNonEmpty("payment.currencyCode", input.payment.currencyCode);
+  const paymentType: Record<string, unknown> = {
+    type: input.payment.type,
+    amount: input.payment.amount,
+    currency_code: input.payment.currencyCode,
+  };
+  if (input.payment.type === "now") {
+    // 3DS return path is required for `now`; init_uuid comes from the card-token
+    // flow. Both live INSIDE payment_type per the documented contract.
+    assertNonEmpty("payment.returnPath", input.payment.returnPath);
+    paymentType.return_path = input.payment.returnPath;
+    if (input.payment.initUuid) {
+      paymentType.init_uuid = input.payment.initUuid;
+    }
+  }
+
+  const partner: Record<string, unknown> = {
+    partner_order_id: input.partner.partnerOrderId,
+  };
+  if (input.partner.comment) partner.comment = input.partner.comment;
+  if (input.partner.amountSellB2b2c) partner.amount_sell_b2b2c = input.partner.amountSellB2b2c;
+
+  const user: Record<string, unknown> = { email: input.user.email };
+  if (input.user.comment) user.comment = input.user.comment;
+  if (input.user.phone) user.phone = input.user.phone;
+
   const body: Record<string, unknown> = {
-    partner_order_id: input.partnerOrderId,
+    user,
+    partner,
     language: input.language,
-    user: {
-      email: input.userEmail,
-      ...(input.userComment ? { comment: input.userComment } : {}),
-    },
     rooms,
-    payment_type: { type: input.paymentType },
+    payment_type: paymentType,
   };
 
-  if (input.paymentType === "now") {
-    // 3DS-related fields are mandatory for `now`; the orchestrator must supply
-    // them. We validate presence here so a misconfigured call fails fast.
-    assertNonEmpty("returnPath", input.returnPath);
-    assertNonEmpty("payUuid", input.payUuid);
-    assertNonEmpty("initUuid", input.initUuid);
-    body.return_path = input.returnPath;
-    body.pay_uuid = input.payUuid;
-    body.init_uuid = input.initUuid;
+  // supplier_data: only include fields we actually have (never invent values).
+  if (input.supplierData) {
+    const sd: Record<string, unknown> = {};
+    if (input.supplierData.firstNameOriginal) sd.first_name_original = input.supplierData.firstNameOriginal;
+    if (input.supplierData.lastNameOriginal) sd.last_name_original = input.supplierData.lastNameOriginal;
+    if (input.supplierData.phone) sd.phone = input.supplierData.phone;
+    if (input.supplierData.email) sd.email = input.supplierData.email;
+    if (Object.keys(sd).length > 0) body.supplier_data = sd;
   }
 
   return body;
+}
+
+/**
+ * Parse the Create Booking (booking/form) response into a non-secret view.
+ * Stores order_id, item_id, payment_types (sanitized: no card data) and
+ * is_gender_specification_required. Defensive: never throws on shape.
+ */
+export function parseCreateBookingResponse(data: unknown): CreateBookingResponse {
+  const result: CreateBookingResponse = {
+    orderId: null,
+    itemId: null,
+    paymentTypes: [],
+    isGenderSpecificationRequired: false,
+  };
+  if (!data || typeof data !== "object") return result;
+
+  const root = data as Record<string, unknown>;
+
+  const idToString = (v: unknown): string | null => {
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    return null;
+  };
+
+  result.orderId = idToString(root.order_id);
+  result.itemId = idToString(root.item_id);
+  result.isGenderSpecificationRequired = root.is_gender_specification_required === true;
+
+  const rawTypes = Array.isArray(root.payment_types) ? root.payment_types : [];
+  for (const entry of rawTypes) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    const type = typeof rec.type === "string" ? rec.type.trim() : "";
+    const amount =
+      typeof rec.amount === "string"
+        ? rec.amount.trim()
+        : typeof rec.amount === "number"
+          ? String(rec.amount)
+          : "";
+    const currencyCode = typeof rec.currency_code === "string" ? rec.currency_code.trim() : "";
+    if (!type || !amount || !currencyCode) continue;
+    result.paymentTypes.push({
+      type,
+      amount,
+      currencyCode,
+      isNeedCreditCardData: rec.is_need_credit_card_data === true,
+      isNeedCvc: rec.is_need_cvc === true,
+    });
+  }
+
+  return result;
+}
+
+/** Select the create-booking payment_types entry matching the configured model. */
+export function selectPaymentType(
+  paymentTypes: ParsedPaymentType[],
+  model: string,
+): SelectedPaymentType | null {
+  const match = paymentTypes.find((p) => p.type === model);
+  if (!match) return null;
+  return { type: match.type, amount: match.amount, currencyCode: match.currencyCode };
+}
+
+/**
+ * Build `rooms[].guests[]` from the EXACT searched/prebooked occupancy and the
+ * real guest names collected at checkout.
+ *
+ * Faithfulness rules (no fabrication):
+ *   - Occupancy (adults + child ages + room grouping) is preserved exactly: one
+ *     guest object per occupant, children flagged with age + is_child.
+ *   - One real collected name is required per occupant (ETG lists every occupant
+ *     in finish; a nameless guest cannot be sent and names must never be faked).
+ *   - Names are validated as real (non-empty, not "guest"/placeholder).
+ * Throws BookingContractError if occupancy is invalid or names are insufficient,
+ * so the orchestrator can reject BEFORE any ETG call.
+ */
+export function buildBookingRooms(
+  occupancy: RoomOccupancy[],
+  guestNames: GuestName[],
+): RoomGuests[] {
+  if (!Array.isArray(occupancy) || occupancy.length === 0) {
+    throw new BookingContractError("occupancy is required");
+  }
+
+  let required = 0;
+  for (const room of occupancy) {
+    if (!room || typeof room.adults !== "number" || room.adults < 1) {
+      throw new BookingContractError("each room needs at least one adult");
+    }
+    const ages = Array.isArray(room.childrenAges) ? room.childrenAges : [];
+    for (const age of ages) {
+      if (typeof age !== "number" || age < 0 || age > 17) {
+        throw new BookingContractError("child age must be 0-17");
+      }
+    }
+    required += room.adults + ages.length;
+  }
+
+  const names = Array.isArray(guestNames) ? guestNames : [];
+  if (names.length !== required) {
+    throw new BookingContractError(
+      `occupancy needs ${required} real guest name(s); have ${names.length}`,
+    );
+  }
+
+  let cursor = 0;
+  return occupancy.map((room) => {
+    const guests: GuestName[] = [];
+    for (let i = 0; i < room.adults; i += 1) {
+      const n = names[cursor++];
+      const guest: GuestName = { firstName: n.firstName, lastName: n.lastName };
+      if (n.gender) {
+        guest.gender = n.gender;
+      }
+      guests.push(guest);
+    }
+    for (const age of room.childrenAges) {
+      const n = names[cursor++];
+      const guest: GuestName = {
+        firstName: n.firstName,
+        lastName: n.lastName,
+        isChild: true,
+        age,
+      };
+      if (n.gender) {
+        guest.gender = n.gender;
+      }
+      guests.push(guest);
+    }
+    return { guests };
+  });
 }
 
 /** Build the check-booking-process request body. */
@@ -569,12 +810,23 @@ export function buildCancelRequest(
   return { partner_order_id: partnerOrderId };
 }
 
-/** Build the order-info request body (by partner order id). */
+/**
+ * Build the order-info / retrieve-bookings request body (by partner order id).
+ *
+ * Per the verified ETG docs, `partner_order_ids` belongs under `search` (NOT
+ * `ordering`). `ordering` and `pagination` are required; `language` is optional.
+ * page_size is bounded 1..50; we ask for a single record.
+ */
 export function buildOrderInfoRequest(
   partnerOrderId: string,
 ): Record<string, unknown> {
   if (!isValidPartnerOrderId(partnerOrderId)) {
     throw new BookingContractError("partnerOrderId must be 1-256 chars");
   }
-  return { ordering: { partner_order_ids: [partnerOrderId] } };
+  return {
+    ordering: { ordering_type: "desc", ordering_by: "created_at" },
+    pagination: { page_size: 1, page_number: 1 },
+    search: { partner_order_ids: [partnerOrderId] },
+    language: "en",
+  };
 }

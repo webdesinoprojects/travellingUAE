@@ -15,6 +15,21 @@
 api-test/reports/*
 !api-test/reports/.gitkeep
 
+
+# Local AI session docs
+.clientmd
+.clientmd.md
+CLAUDEREPORT.MD
+STANDALONE_HOTEL_BOOKING_PROMPT.md
+old.env
+scripts/migrate-supabase-full.ps1
+
+# Local Ratehawk working directory
+ratewhawk/
+
+
+
+
 # next.js
 /.next/
 /out/

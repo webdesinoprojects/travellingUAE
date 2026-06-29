@@ -13,6 +13,9 @@ import {
   createPaymentPendingBooking,
   linkStripeSessionToBooking,
 } from "@/server/mutations/bookings";
+import { extractTrustedUserIp } from "@/server/providers/ratehawk/booking/ip-trust";
+import { validateCheckoutGuestRooms } from "@/server/providers/ratehawk/booking/checkout-guests";
+import type { ValidatedCheckoutGuestRoom } from "@/server/providers/ratehawk/booking/checkout-guests";
 import {
   getStripe,
   hasStripeEnv,
@@ -69,7 +72,7 @@ export async function POST(
     const phone = readString(body, "phone", { min: 5, max: 40, required: true })!;
     const nationality = readString(body, "nationality", { max: 80 });
     // Use the server-authoritative travelersCount from the locked session.
-    // If the client submits a value, validate it matches — mismatch means a
+    // If the client submits a value, validate it matches - mismatch means a
     // stale form or tampered request; reject rather than silently mischarge.
     const bodyTravelersCount = readNumber(body, "travelersCount", { min: 1, max: 50 });
     if (
@@ -80,6 +83,30 @@ export async function POST(
     }
     const travelersCount = pricing.travelersCount;
     const message = readString(body, "message", { max: 2000 });
+    let trustedUserIp: string | null = null;
+    let checkoutGuestRooms: ValidatedCheckoutGuestRoom[] | null = null;
+
+    if (summary.hotelOccupancy && summary.hotelOccupancy.length > 0) {
+      trustedUserIp = extractTrustedUserIp(request.headers);
+
+      if (!trustedUserIp) {
+        return jsonError(
+          400,
+          "We could not verify your network details. Please send an enquiry or contact us.",
+        );
+      }
+
+      const guestValidation = validateCheckoutGuestRooms(
+        (body as Record<string, unknown>).guestRooms,
+        summary.hotelOccupancy,
+      );
+
+      if (!guestValidation.ok) {
+        return jsonError(400, "Please review traveler details and try again.");
+      }
+
+      checkoutGuestRooms = guestValidation.rooms ?? null;
+    }
 
     // Segment IDs identify which selections are included (safe, no provider hashes).
     // Prebook snapshot links are stored on the selection rows themselves.
@@ -112,6 +139,8 @@ export async function POST(
       totalPayableAmount: totalPayable,
       totalPayableCurrency: currency,
       pricingSnapshot,
+      trustedUserIp,
+      checkoutGuestRooms,
     });
 
     const stripe = getStripe();

@@ -13,10 +13,21 @@
  * production payload must be confirmed verbatim at certification.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 /** Default freshness window for the webhook timestamp (seconds). */
 export const DEFAULT_WEBHOOK_TOLERANCE_SECONDS = 300;
+
+/**
+ * Non-secret idempotency fingerprint for a webhook delivery.
+ *
+ * = sha256(`${timestamp}:${token}`) as hex. The raw token is a secret-equivalent
+ * nonce and must never be persisted; this one-way hash is safe to store and
+ * unique per delivery, so it doubles as the dedupe key.
+ */
+export function computeWebhookDedupeKey(timestamp: string, token: string): string {
+  return createHash("sha256").update(`${timestamp}:${token}`).digest("hex");
+}
 
 /**
  * Compute the expected hex signature for a webhook callback.

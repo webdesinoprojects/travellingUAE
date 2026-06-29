@@ -30,6 +30,7 @@ import {
 import { getLocalHotelContent } from "@/server/hotels/content";
 import type {
   ActivityOptionDTO,
+  CheckoutGuestRoom,
   CheckoutLineItem,
   CheckoutPricing,
   CheckoutSummaryDTO,
@@ -1878,6 +1879,26 @@ function parseGuestRooms(raw: unknown): GuestRoom[] | null {
   return rooms.length > 0 ? rooms : null;
 }
 
+function buildCheckoutGuestRooms(rooms: GuestRoom[] | null): CheckoutGuestRoom[] | undefined {
+  if (!rooms || rooms.length === 0) {
+    return undefined;
+  }
+
+  return rooms.map((room, roomIndex) => {
+    const guests: CheckoutGuestRoom["guests"] = [];
+
+    for (let i = 0; i < room.adults; i += 1) {
+      guests.push({ kind: "adult" });
+    }
+
+    for (const age of room.children) {
+      guests.push({ kind: "child", age });
+    }
+
+    return { roomIndex, guests };
+  });
+}
+
 function buildCancellationSummary(
   freeBefore: string | null,
   policiesCount: number,
@@ -1962,7 +1983,8 @@ export async function getCheckoutSummary({
     .select(
       "segment_id,option_type,flight_option_id,hotel_option_id,transfer_option_id,activity_option_id,price_delta_amount,currency,metadata",
     )
-    .eq("session_id", sess.id);
+    .eq("session_id", sess.id)
+    .eq("status", "selected");
 
   if (selectionsResult.error) {
     throw selectionsResult.error;
@@ -2118,8 +2140,39 @@ export async function getCheckoutSummary({
     }
   }
 
+  const quoteSnapshotIds = selectionRows
+    .filter(
+      (r) =>
+        isPlainRecord(r.metadata) &&
+        typeof r.metadata.quote_snapshot_id === "string",
+    )
+    .map((r) => (r.metadata as Record<string, unknown>).quote_snapshot_id as string);
+
+  type QuoteSafeRow = {
+    id: string;
+    safe_payload: Record<string, unknown> | null;
+  };
+
+  const quoteSafeMap = new Map<string, QuoteSafeRow>();
+
+  if (quoteSnapshotIds.length > 0) {
+    const quoteRes = await supabase
+      .from("provider_quote_snapshots")
+      .select("id,safe_payload")
+      .in("id", quoteSnapshotIds);
+
+    if (quoteRes.error) {
+      throw quoteRes.error;
+    }
+
+    for (const row of (quoteRes.data ?? []) as unknown as QuoteSafeRow[]) {
+      quoteSafeMap.set(row.id, row);
+    }
+  }
+
   // Build line items.
   const selections: CheckoutLineItem[] = [];
+  let hotelOccupancy: CheckoutGuestRoom[] | undefined;
 
   for (const row of selectionRows) {
     const segmentTitle = segmentTitleMap.get(row.segment_id) ?? "Option";
@@ -2155,6 +2208,17 @@ export async function getCheckoutSummary({
           typeof safeP.board_basis === "string" ? safeP.board_basis : null;
         nights =
           typeof safeP.nights === "number" ? safeP.nights : null;
+      }
+
+      if (
+        !hotelOccupancy &&
+        isPlainRecord(meta) &&
+        typeof meta.quote_snapshot_id === "string"
+      ) {
+        const quote = quoteSafeMap.get(meta.quote_snapshot_id);
+        hotelOccupancy = buildCheckoutGuestRooms(
+          parseGuestRooms(quote?.safe_payload?.guests),
+        );
       }
     } else if (optionType === "flight" && row.flight_option_id) {
       const f = flightOptMap.get(row.flight_option_id);
@@ -2217,6 +2281,7 @@ export async function getCheckoutSummary({
     travelersCount,
     totalDelta: moneyDelta(totalDeltaAmount, pricingCurrency),
     pricing,
+    ...(hotelOccupancy ? { hotelOccupancy } : {}),
     expiresAt: sess.expires_at,
   };
 }

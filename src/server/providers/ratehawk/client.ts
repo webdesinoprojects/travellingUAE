@@ -470,6 +470,162 @@ async function attemptOnce<T>(
 }
 
 /**
+ * Raw booking request that preserves the full ETG envelope without throwing on
+ * application-level status values (processing, 3ds, completed, etc.).
+ *
+ * Unlike rateHawkRequest:
+ * - Returns { status, error } from the envelope rather than throwing on non-ok.
+ * - Does NOT require envelope.data to be present.
+ * - HTTP 5xx / 429 returns { httpStatus, status: null, error: null } instead of throwing.
+ * - Still throws RateHawkError for network errors and auth failures (401/403).
+ *
+ * Must only be called for non-idempotent booking endpoints (no automatic retry).
+ */
+export type RawBookingEnvelope = {
+  /** ETG envelope `status` value, lowercased (e.g. "ok", "processing", "3ds"). */
+  status: string | null;
+  /** ETG envelope `error` slug, sanitized (e.g. "soldout"). */
+  error: string | null;
+  /** ETG envelope `data` field as-is. Caller must strip hashes/PII before passing up. */
+  data: unknown;
+  httpStatus: number;
+  rateLimit: RateLimitSnapshot;
+};
+
+export async function rateHawkBookingRequest(
+  path: string,
+  body: Record<string, unknown>,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<RawBookingEnvelope> {
+  const config = getRateHawkConfig();
+  const host = config.baseUrl;
+
+  if (!breakerAllows(host)) {
+    // Breaker already open: reject fast WITHOUT recording another failure (that
+    // would keep resetting the cooldown and prevent recovery under load).
+    return {
+      status: null,
+      error: "circuit_open",
+      data: null,
+      httpStatus: 503,
+      rateLimit: { limit: null, remaining: null, resetSeconds: null },
+    };
+  }
+
+  await acquireSlot();
+
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const parentSignal = options?.signal;
+  const onParentAbort = () => controller.abort();
+  parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+
+  const startedAt = Date.now();
+
+  try {
+    let response: Response;
+
+    try {
+      response = await fetch(`${config.baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          Authorization: buildAuthHeader(config),
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "User-Agent": USER_AGENT,
+        },
+        body: JSON.stringify(body),
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    } catch {
+      const ms = Date.now() - startedAt;
+
+      if (controller.signal.aborted) {
+        logSafe("retry", { method: "POST", path, attempt: 1, ms, code: "timeout" });
+        return {
+          status: null,
+          error: "timeout",
+          data: null,
+          httpStatus: 0,
+          rateLimit: { limit: null, remaining: null, resetSeconds: null },
+        };
+      }
+
+      logSafe("fail", { method: "POST", path, attempt: 1, ms, code: "network_error" });
+      throw new RateHawkError("network_error", "Provider request failed", { retryable: true });
+    }
+
+    const rateLimit = readRateLimit(response.headers);
+    const ms = Date.now() - startedAt;
+
+    // Auth failures are hard errors - circuit break and throw.
+    if (response.status === 401 || response.status === 403) {
+      logSafe("fail", { method: "POST", path, status: response.status, attempt: 1, ms });
+      recordBreakerFailure(host);
+      throw new RateHawkError("http_error", "Provider auth rejected", {
+        httpStatus: response.status,
+        retryable: false,
+      });
+    }
+
+    // 5xx / 429: transient - record failure and return as signal (don't throw).
+    if (response.status === 429 || response.status >= 500) {
+      logSafe("retry", { method: "POST", path, status: response.status, attempt: 1, ms });
+      recordBreakerFailure(host);
+      return { status: null, error: null, data: null, httpStatus: response.status, rateLimit };
+    }
+
+    let envelope: EtgEnvelope | null = null;
+
+    try {
+      envelope = (await response.json()) as EtgEnvelope;
+    } catch {
+      logSafe("fail", { method: "POST", path, status: response.status, attempt: 1, ms });
+      throw new RateHawkError("invalid_response", "Provider returned an unreadable response", {
+        httpStatus: response.status,
+      });
+    }
+
+    const envelopeStatus =
+      typeof envelope?.status === "string"
+        ? envelope.status.trim().toLowerCase() || null
+        : null;
+    const envelopeError = sanitizeProviderCode(envelope?.error) ?? null;
+
+    // Circuit breaker counts ONLY infra/transport/rate-limit failures (network,
+    // timeout, 5xx, 429 - handled above). A clean HTTP-200 envelope means the
+    // provider is healthy, even when it carries an ETG BUSINESS error
+    // (rate_not_found, contract_mismatch, duplicate_reservation, soldout, ...).
+    // Business errors update booking/job state via the classifiers, and must NOT
+    // trip the breaker. So any HTTP-200 envelope records breaker success.
+    recordBreakerSuccess(host);
+
+    logSafe(envelopeStatus === "ok" ? "ok" : "retry", {
+      method: "POST",
+      path,
+      status: response.status,
+      attempt: 1,
+      ms,
+      code: envelopeError ?? undefined,
+    });
+
+    return {
+      status: envelopeStatus,
+      error: envelopeError,
+      data: envelope?.data ?? null,
+      httpStatus: response.status,
+      rateLimit,
+    };
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onParentAbort);
+    releaseSlot();
+  }
+}
+
+/**
  * Execute a RateHawk request with concurrency control, circuit breaking and
  * safe retry. Returns the ETG `data` payload plus rate-limit metadata.
  */

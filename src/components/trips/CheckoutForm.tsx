@@ -2,6 +2,7 @@
 
 import { CheckCircle2, CreditCard, Loader2 } from "lucide-react";
 import { useState } from "react";
+import type { CheckoutGuestRoom } from "@/types/itinerary";
 
 type Field = {
   name: string;
@@ -30,10 +31,33 @@ type Props = {
   stripeSessionPath?: string | null;
   /** Formatted total payable, e.g. "SAR 6,500". Shown in the pay button when stripeSessionPath is set. */
   checkoutAmountLabel?: string | null;
+  /** Exact RateHawk room occupancy that must be supplied before card payment. */
+  hotelOccupancy?: CheckoutGuestRoom[];
 };
 
 type FormState = "idle" | "submitting" | "success" | "error";
 type PayState = "idle" | "redirecting" | "error";
+type GuestFormGender = "" | "male" | "female";
+type GuestFormGuest = {
+  kind: "adult" | "child";
+  age?: number;
+  firstName: string;
+  lastName: string;
+  gender: GuestFormGender;
+};
+type GuestFormRoom = { guests: GuestFormGuest[] };
+
+function createGuestFormRooms(hotelOccupancy?: CheckoutGuestRoom[]): GuestFormRoom[] {
+  return (hotelOccupancy ?? []).map((room) => ({
+    guests: room.guests.map((guest) => ({
+      kind: guest.kind,
+      ...(guest.age != null ? { age: guest.age } : {}),
+      firstName: "",
+      lastName: "",
+      gender: "",
+    })),
+  }));
+}
 
 export function CheckoutForm({
   destinationSlug,
@@ -43,10 +67,37 @@ export function CheckoutForm({
   tripPageHref,
   stripeSessionPath,
   checkoutAmountLabel,
+  hotelOccupancy,
 }: Props) {
   const [formState, setFormState] = useState<FormState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [payState, setPayState] = useState<PayState>("idle");
+  const [guestRooms, setGuestRooms] = useState<GuestFormRoom[]>(() =>
+    createGuestFormRooms(hotelOccupancy),
+  );
+
+  function updateGuestField(
+    roomIndex: number,
+    guestIndex: number,
+    field: "firstName" | "lastName" | "gender",
+    value: string | GuestFormGender,
+  ) {
+    setGuestRooms((current) =>
+      current.map((room, rIndex) =>
+        rIndex !== roomIndex
+          ? room
+          : {
+              guests: room.guests.map((guest, gIndex) =>
+                gIndex !== guestIndex
+                  ? guest
+                  : field === "gender"
+                    ? { ...guest, gender: value as GuestFormGender }
+                    : { ...guest, [field]: value as string },
+              ),
+            },
+      ),
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -108,6 +159,7 @@ export function CheckoutForm({
       nationality: data.get("nationality"),
       travelersCount: travelersCount,
       message: data.get("message"),
+      ...(guestRooms.length > 0 ? { guestRooms } : {}),
     };
 
     try {
@@ -200,6 +252,104 @@ export function CheckoutForm({
           </a>
         </p>
       </div>
+
+      {guestRooms.length > 0 ? (
+        <section className="rounded-lg border border-border-soft bg-surface-muted/35 p-4 dark:bg-white/[0.03]">
+          <h3 className="text-sm font-extrabold text-brand-navy dark:text-white">
+            Hotel traveler details
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-brand-navy/58 dark:text-white/55">
+            Enter names exactly as on passport. These details must match the
+            selected hotel occupancy before secure payment can start.
+          </p>
+
+          <div className="mt-4 grid gap-4">
+            {guestRooms.map((room, roomIndex) => (
+              <div
+                key={`room-${roomIndex}`}
+                className="rounded-lg border border-border-soft bg-surface p-3 dark:bg-black/20"
+              >
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-brand-blue/70 dark:text-brand-sand">
+                  Room {roomIndex + 1}
+                </p>
+                <div className="mt-3 grid gap-3">
+                  {room.guests.map((guest, guestIndex) => {
+                    const label =
+                      guest.kind === "child"
+                        ? `Child ${guest.age != null ? `(age ${guest.age})` : ""}`
+                        : `Adult ${guestIndex + 1}`;
+
+                    return (
+                      <div
+                        key={`room-${roomIndex}-guest-${guestIndex}`}
+                        className="grid gap-2 rounded-lg border border-border-soft/80 p-3 sm:grid-cols-[1fr_1fr_140px]"
+                      >
+                        <div className="sm:col-span-3">
+                          <p className="text-xs font-bold text-brand-navy/60 dark:text-white/55">
+                            {label}
+                          </p>
+                        </div>
+                        <input
+                          name={`guest-${roomIndex}-${guestIndex}-firstName`}
+                          type="text"
+                          required
+                          value={guest.firstName}
+                          placeholder="First name"
+                          autoComplete="given-name"
+                          onChange={(e) =>
+                            updateGuestField(
+                              roomIndex,
+                              guestIndex,
+                              "firstName",
+                              e.target.value,
+                            )
+                          }
+                          className="h-10 rounded-lg border border-border-soft bg-surface px-3 text-sm text-brand-navy placeholder-brand-navy/38 outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:placeholder-white/30 dark:ring-brand-sand/30 dark:focus:border-brand-sand"
+                        />
+                        <input
+                          name={`guest-${roomIndex}-${guestIndex}-lastName`}
+                          type="text"
+                          required
+                          value={guest.lastName}
+                          placeholder="Last name"
+                          autoComplete="family-name"
+                          onChange={(e) =>
+                            updateGuestField(
+                              roomIndex,
+                              guestIndex,
+                              "lastName",
+                              e.target.value,
+                            )
+                          }
+                          className="h-10 rounded-lg border border-border-soft bg-surface px-3 text-sm text-brand-navy placeholder-brand-navy/38 outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:placeholder-white/30 dark:ring-brand-sand/30 dark:focus:border-brand-sand"
+                        />
+                        <select
+                          name={`guest-${roomIndex}-${guestIndex}-gender`}
+                          required
+                          value={guest.gender}
+                          onChange={(e) =>
+                            updateGuestField(
+                              roomIndex,
+                              guestIndex,
+                              "gender",
+                              e.target.value as GuestFormGender,
+                            )
+                          }
+                          className="h-10 rounded-lg border border-border-soft bg-surface px-3 text-sm text-brand-navy outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:ring-brand-sand/30 dark:focus:border-brand-sand"
+                        >
+                          <option value="">Gender</option>
+                          <option value="male">Male</option>
+                          <option value="female">Female</option>
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <div>
         <label
