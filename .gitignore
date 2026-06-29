@@ -24,6 +24,16 @@ STANDALONE_HOTEL_BOOKING_PROMPT.md
 old.env
 scripts/migrate-supabase-full.ps1
 
+# Local test/dev tracking files
+api-test/reports/latest.json
+api-test/reports/latest.md
+api-test/run-smoke.ps1
+api-test/run-stripe-sp1-smoke.ps1
+dev-left/phase-3/left.md
+dev-left/phase-5/left.md
+docs/sql-run-order.md
+full-bakcned-plan.md
+
 # Local Ratehawk working directory
 ratewhawk/
 
