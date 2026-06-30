@@ -73,6 +73,8 @@ next-env.d.ts
 
 # local agent/dev handoff files
 .vscode/
+hotel-booking-review-*/
+hotel-booking-review-*.zip
 tmp/
 dev/
 dev-left/

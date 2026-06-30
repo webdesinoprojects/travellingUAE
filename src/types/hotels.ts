@@ -1,3 +1,5 @@
+import type { CheckoutGuestRoom } from "./itinerary";
+
 export type HotelGuestRoom = {
   adults: number;
   children: number[];
@@ -20,6 +22,8 @@ export type HotelDestinationSuggestion = {
   name: string;
   countryCode: string | null;
   type: string;
+  hotelId?: string | null;
+  hid?: number | null;
 };
 
 export type HotelSearchCardDTO = {
@@ -63,4 +67,37 @@ export type HotelDetailDTO = {
   rooms: HotelGuestRoom[];
   rates: HotelRateDTO[];
   expiresAt: string;
+};
+
+export type StandaloneHotelCheckoutSummaryDTO = {
+  checkoutId: string;
+  status:
+    | "form_created"
+    | "unsupported_payment"
+    | "payment_pending"
+    | "finish_started"
+    | "processing"
+    | "confirmed"
+    | "failed"
+    | "pending_review"
+    | "expired";
+  hotel: {
+    id: string;
+    name: string;
+    roomName: string | null;
+    boardBasis: string | null;
+  };
+  checkIn: string;
+  checkOut: string;
+  residency: string;
+  rooms: CheckoutGuestRoom[];
+  price: { amount: number; currency: string };
+  originalPrice: { amount: number; currency: string } | null;
+  priceChanged: boolean;
+  cancellationSummary: string | null;
+  cancellationFreeBefore: string | null;
+  payment:
+    | { mode: "deposit"; amount: string; currencyCode: string }
+    | { mode: "unsupported"; reason: string; returnedTypes: string[] };
+  isGenderSpecificationRequired: boolean;
 };

@@ -864,8 +864,8 @@ export async function prebookHotelRate(
   const lang = LANGUAGE_RE.test(language) ? language : "en";
   const hash = bookHash.trim();
 
-  if (!hash) {
-    throw new HotelSearchValidationError("bookHash is required");
+  if (!hash || !hash.startsWith("h-")) {
+    throw new HotelSearchValidationError("hotelpage h-* bookHash is required");
   }
 
   const response = await rateHawkRequest<unknown>(
@@ -888,6 +888,13 @@ export async function prebookHotelRate(
     throw new RateHawkError(
       "invalid_response",
       "Provider prebook response missing booking hash",
+    );
+  }
+
+  if (!prebookHash.startsWith("p-")) {
+    throw new RateHawkError(
+      "invalid_response",
+      "Provider prebook response missing p-* booking hash",
     );
   }
 

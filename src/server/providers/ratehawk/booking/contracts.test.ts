@@ -26,6 +26,10 @@ import {
   normalizeSignal,
   buildBookingRooms,
   parseCreateBookingResponse,
+  decideStandaloneFinishAfterStripe,
+  isHotelPageBookHash,
+  isPrebookBookHash,
+  selectDepositPaymentType,
   selectPaymentType,
   BookingContractError,
 } from "./contracts.ts";
@@ -289,6 +293,26 @@ test("buildCreateBookingRequest rejects bad partner id and missing fields", () =
   );
 });
 
+test("hotelpage/prebook hash guards enforce h-* then p-* sequence", () => {
+  assert.equal(isHotelPageBookHash("h-hotelpage-token"), true);
+  assert.equal(isHotelPageBookHash("p-prebook-token"), false);
+  assert.equal(isPrebookBookHash("p-prebook-token"), true);
+  assert.equal(isPrebookBookHash("h-hotelpage-token"), false);
+});
+
+test("buildCreateBookingRequest rejects hotelpage h-* hashes", () => {
+  assert.throws(
+    () =>
+      buildCreateBookingRequest({
+        bookHash: "h-hotelpage-token",
+        partnerOrderId: "po-1",
+        language: "en",
+        userIp: "1.2.3.4",
+      }),
+    BookingContractError,
+  );
+});
+
 test("buildStartBookingRequest uses official nested shape (partner/payment_type/supplier_data)", () => {
   const body = buildStartBookingRequest({
     partner: { partnerOrderId: "po-1", amountSellB2b2c: "120.00" },
@@ -334,7 +358,7 @@ test("buildStartBookingRequest uses official nested shape (partner/payment_type/
   });
 });
 
-test("buildStartBookingRequest puts return_path inside payment_type for 'now'", () => {
+test("buildStartBookingRequest puts return_path at top-level for 'now'", () => {
   assert.throws(
     () =>
       buildStartBookingRequest({
@@ -357,13 +381,14 @@ test("buildStartBookingRequest puts return_path inside payment_type for 'now'", 
       currencyCode: "EUR",
       returnPath: "https://flytime.example/return",
       initUuid: "init-1",
+      payUuid: "pay-1",
     },
   });
   const pt = ok.payment_type as Record<string, unknown>;
-  assert.equal(pt.return_path, "https://flytime.example/return");
-  assert.equal(pt.init_uuid, "init-1");
-  // No top-level 3DS fields.
-  assert.equal("return_path" in ok, false);
+  assert.deepEqual(pt, { type: "now", amount: "40.85", currency_code: "EUR" });
+  assert.equal(ok.return_path, "https://flytime.example/return");
+  assert.equal(ok.init_uuid, "init-1");
+  assert.equal(ok.pay_uuid, "pay-1");
 });
 
 test("buildStartBookingRequest rejects placeholder guest names", () => {
@@ -460,6 +485,41 @@ test("selectPaymentType returns the matching entry or null", () => {
   ];
   assert.deepEqual(selectPaymentType(types, "hotel"), { type: "hotel", amount: "1", currencyCode: "EUR" });
   assert.equal(selectPaymentType(types, "now"), null);
+});
+
+test("selectDepositPaymentType only permits Stripe mapping for deposit", () => {
+  const withoutDeposit = [
+    { type: "hotel", amount: "1", currencyCode: "EUR", isNeedCreditCardData: false, isNeedCvc: false },
+    { type: "now", amount: "1", currencyCode: "EUR", isNeedCreditCardData: true, isNeedCvc: true },
+  ];
+  const withDeposit = [
+    ...withoutDeposit,
+    { type: "deposit", amount: "25.50", currencyCode: "EUR", isNeedCreditCardData: false, isNeedCvc: false },
+  ];
+  assert.equal(selectDepositPaymentType(withoutDeposit), null);
+  assert.deepEqual(selectDepositPaymentType(withDeposit), {
+    type: "deposit",
+    amount: "25.50",
+    currencyCode: "EUR",
+  });
+});
+
+test("standalone Stripe success starts ETG finish exactly from payment_pending", () => {
+  assert.equal(
+    decideStandaloneFinishAfterStripe({ status: "payment_pending", stripePaid: false }),
+    "not_paid",
+  );
+  assert.equal(
+    decideStandaloneFinishAfterStripe({ status: "payment_pending", stripePaid: true }),
+    "start",
+  );
+  for (const status of ["finish_started", "processing", "confirmed", "failed"]) {
+    assert.equal(
+      decideStandaloneFinishAfterStripe({ status, stripePaid: true }),
+      "already_started",
+      status,
+    );
+  }
 });
 
 test("status/cancel builders shape the body", () => {

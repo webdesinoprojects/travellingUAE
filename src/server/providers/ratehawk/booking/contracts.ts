@@ -472,8 +472,9 @@ export type SelectedPaymentType = {
   type: string;
   amount: string;
   currencyCode: string;
-  /** Documented inside payment_type for `now`/3DS rates only. */
+  /** ETG card-token/3DS flow identifiers for `now` rates only. */
   initUuid?: string;
+  payUuid?: string;
   returnPath?: string;
 };
 
@@ -501,6 +502,14 @@ export class BookingContractError extends Error {
     super(message);
     this.name = "BookingContractError";
   }
+}
+
+export function isHotelPageBookHash(value: unknown): value is string {
+  return typeof value === "string" && value.trim().startsWith("h-");
+}
+
+export function isPrebookBookHash(value: unknown): value is string {
+  return typeof value === "string" && value.trim().startsWith("p-");
 }
 
 /** Generate a fresh, unique partner_order_id. New value on every attempt. */
@@ -531,7 +540,10 @@ function assertNonEmpty(label: string, value: unknown): string {
 export function buildCreateBookingRequest(
   input: CreateBookingInput,
 ): Record<string, unknown> {
-  assertNonEmpty("bookHash", input.bookHash);
+  const bookHash = assertNonEmpty("bookHash", input.bookHash);
+  if (!isPrebookBookHash(bookHash)) {
+    throw new BookingContractError("bookHash must be a prebook p-* hash");
+  }
   assertNonEmpty("language", input.language);
   assertNonEmpty("userIp", input.userIp);
 
@@ -541,7 +553,7 @@ export function buildCreateBookingRequest(
 
   return {
     partner_order_id: input.partnerOrderId,
-    book_hash: input.bookHash,
+    book_hash: bookHash,
     language: input.language,
     user_ip: input.userIp,
   };
@@ -565,8 +577,8 @@ function assertRealGuestName(label: string, value: unknown): string {
  *   - `partner.partner_order_id` (NESTED, not top-level), optional comment /
  *     amount_sell_b2b2c.
  *   - `payment_type` = one complete `payment_types` entry from Create Booking,
- *     resent as { type, amount, currency_code } (+ init_uuid / return_path inside
- *     payment_type for `now`/3DS rates).
+ *     resent as { type, amount, currency_code }; `now`/3DS token fields are
+ *     top-level (`return_path`, `init_uuid`, `pay_uuid`).
  *   - `supplier_data` with documented fields, included only when real values
  *     exist (never invented).
  *   - `user` { email, comment?, phone? } and `rooms[].guests[]` with real names.
@@ -618,15 +630,6 @@ export function buildStartBookingRequest(
     amount: input.payment.amount,
     currency_code: input.payment.currencyCode,
   };
-  if (input.payment.type === "now") {
-    // 3DS return path is required for `now`; init_uuid comes from the card-token
-    // flow. Both live INSIDE payment_type per the documented contract.
-    assertNonEmpty("payment.returnPath", input.payment.returnPath);
-    paymentType.return_path = input.payment.returnPath;
-    if (input.payment.initUuid) {
-      paymentType.init_uuid = input.payment.initUuid;
-    }
-  }
 
   const partner: Record<string, unknown> = {
     partner_order_id: input.partner.partnerOrderId,
@@ -645,6 +648,18 @@ export function buildStartBookingRequest(
     rooms,
     payment_type: paymentType,
   };
+
+  if (input.payment.type === "now") {
+    // Standalone hotel booking does not use `now`; this preserves the shared
+    // helper shape for the separate ETG card-token/3DS implementation.
+    body.return_path = assertNonEmpty("payment.returnPath", input.payment.returnPath);
+    if (input.payment.initUuid) {
+      body.init_uuid = input.payment.initUuid;
+    }
+    if (input.payment.payUuid) {
+      body.pay_uuid = input.payment.payUuid;
+    }
+  }
 
   // supplier_data: only include fields we actually have (never invent values).
   if (input.supplierData) {
@@ -718,6 +733,23 @@ export function selectPaymentType(
   const match = paymentTypes.find((p) => p.type === model);
   if (!match) return null;
   return { type: match.type, amount: match.amount, currencyCode: match.currencyCode };
+}
+
+export function selectDepositPaymentType(
+  paymentTypes: ParsedPaymentType[],
+): SelectedPaymentType | null {
+  return selectPaymentType(paymentTypes, "deposit");
+}
+
+export type StandaloneFinishDecision = "start" | "already_started" | "not_paid";
+
+export function decideStandaloneFinishAfterStripe(input: {
+  status: string | null;
+  stripePaid: boolean;
+}): StandaloneFinishDecision {
+  if (!input.stripePaid) return "not_paid";
+  if (input.status === "payment_pending") return "start";
+  return "already_started";
 }
 
 /**

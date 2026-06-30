@@ -38,6 +38,21 @@ export function jsonError(
 export function logServerError(scope: string, error: unknown) {
   const safeError = toError(error);
 
-  console.error(`[${scope}] ${safeError.name}: ${safeError.message}`);
+  // Extract Supabase-specific error fields if present
+  const errorObj = error as Record<string, unknown> | null;
+  const supabaseFields: Record<string, unknown> = {};
+  
+  if (errorObj) {
+    if (errorObj.code) supabaseFields.code = errorObj.code;
+    if (errorObj.message) supabaseFields.message = errorObj.message;
+    if (errorObj.details) supabaseFields.details = errorObj.details;
+    if (errorObj.hint) supabaseFields.hint = errorObj.hint;
+  }
+
+  if (Object.keys(supabaseFields).length > 0) {
+    console.error(`[${scope}] ${safeError.name}: ${safeError.message}`, supabaseFields);
+  } else {
+    console.error(`[${scope}] ${safeError.name}: ${safeError.message}`);
+  }
 }
 

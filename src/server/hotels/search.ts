@@ -3,7 +3,10 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 
 import { logServerError } from "@/server/http/response";
-import { getLocalHotelContent } from "@/server/hotels/content";
+import {
+  getLocalHotelContent,
+  getLocalHotelDestinationSuggestions,
+} from "@/server/hotels/content";
 import { buildLiveHotelQuotes, buildRequestHash } from "@/server/providers/ratehawk/hotel-options";
 import {
   mapMealToBoardBasis,
@@ -61,6 +64,9 @@ type QuoteRow = {
   expires_at: string | null;
 };
 
+export type HotelSearchSessionForBooking = SearchSessionRow;
+export type HotelQuoteSnapshotForBooking = QuoteRow;
+
 export class HotelSearchError extends Error {
   readonly publicStatus: number;
   readonly publicMessage: string;
@@ -88,6 +94,34 @@ export async function getHotelDestinationSuggestions(
   const cacheKey = `${normalizedLanguage}:${normalizedQuery}`;
   const cached = suggestionCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
+
+  const providerId = await getRateHawkProviderId();
+  const local = await getLocalHotelDestinationSuggestions(
+    providerId,
+    normalizedQuery,
+    normalizedLanguage,
+  );
+  if (local.length > 0) {
+    suggestionCache.set(cacheKey, {
+      data: local,
+      expiresAt: Date.now() + SUGGESTION_TTL_MS,
+    });
+    pruneSuggestionCache();
+    return local;
+  }
+
+  if (
+    (process.env.RATEHAWK_AUTOCOMPLETE_LIVE_FALLBACK_ENABLED ?? "")
+      .trim()
+      .toLowerCase() !== "true"
+  ) {
+    suggestionCache.set(cacheKey, {
+      data: [],
+      expiresAt: Date.now() + SUGGESTION_TTL_MS,
+    });
+    pruneSuggestionCache();
+    return [];
+  }
 
   const provider = await suggestRegionsAndHotels(
     normalizedQuery,
@@ -279,6 +313,42 @@ export async function getHotelDetail(
   };
 }
 
+export async function getOwnedHotelSearchSessionForBooking(
+  searchId: string,
+  token: string | undefined,
+): Promise<HotelSearchSessionForBooking | null> {
+  return readOwnedSession(searchId, token);
+}
+
+export async function getHotelQuoteSnapshotForBooking({
+  searchId,
+  hotelId,
+  quoteId,
+  stage,
+}: {
+  searchId: string;
+  hotelId: string;
+  quoteId: string;
+  stage: "serp" | "hotelpage";
+}): Promise<HotelQuoteSnapshotForBooking | null> {
+  if (!isUuid(searchId) || !isUuid(quoteId) || !hotelId.trim()) return null;
+
+  const result = await getSupabaseAdminClient()
+    .from("provider_quote_snapshots")
+    .select("id,provider_reference,currency,price_amount,safe_payload,metadata,expires_at")
+    .eq("id", quoteId)
+    .eq("search_session_id", searchId)
+    .eq("provider_reference", hotelId)
+    .eq("service_type", "hotel")
+    .eq("status", "available")
+    .eq("safe_payload->>stage", stage)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+
+  if (result.error) throw result.error;
+  return (result.data as unknown as QuoteRow | null) ?? null;
+}
+
 async function createHotelPageQuotes(
   context: SearchSessionRow,
   searchQuote: QuoteRow,
@@ -452,6 +522,22 @@ async function resolveProviderDestination(input: {
     providerId: provider.data.id as string,
     regionId: Number(mapping.data.external_region_id),
   };
+}
+
+async function getRateHawkProviderId(): Promise<string> {
+  const provider = await getSupabaseAdminClient()
+    .from("external_providers")
+    .select("id")
+    .eq("slug", RATEHAWK_PROVIDER_SLUG)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (provider.error) throw provider.error;
+  if (!provider.data) {
+    throw new HotelSearchError(503, "Hotel search is not available right now.");
+  }
+
+  return provider.data.id as string;
 }
 
 function normalizeSearchInput(input: HotelSearchInput) {

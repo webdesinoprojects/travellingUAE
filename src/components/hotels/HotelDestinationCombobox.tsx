@@ -176,7 +176,7 @@ export function HotelDestinationCombobox({ value, onChange }: Props) {
             suggestions.map((suggestion, index) => (
               <button
                 id={`${listId}-${index}`}
-                key={suggestion.regionId}
+                key={`${suggestion.type}:${suggestion.hotelId ?? suggestion.hid ?? suggestion.regionId}:${index}`}
                 type="button"
                 role="option"
                 aria-selected={index === activeIndex}

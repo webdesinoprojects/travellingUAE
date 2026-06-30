@@ -1,8 +1,9 @@
-import { ArrowLeft, BedDouble, CalendarDays, Hotel, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, Hotel, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
 
+import { StandaloneHotelRates } from "@/components/hotels/StandaloneHotelRates";
 import {
   getHotelDetail,
   HOTEL_SEARCH_COOKIE,
@@ -104,32 +105,11 @@ export default async function HotelDetailPage({
           <p className="mt-2 text-sm text-brand-navy/60 dark:text-white/60">
             Rates are checked live. Final price and cancellation terms are reconfirmed before payment.
           </p>
-          <div className="mt-5 grid gap-4">
-            {detail.rates.map((rate) => (
-              <article
-                key={rate.rateId}
-                className="flex flex-col gap-4 rounded-lg border border-border-soft bg-surface p-5 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <h3 className="flex items-center gap-2 text-lg font-black">
-                    <BedDouble className="size-5 text-brand-blue" aria-hidden="true" />
-                    {rate.roomName ?? "Hotel room"}
-                  </h3>
-                  <p className="mt-2 text-sm font-semibold text-brand-navy/60 dark:text-white/60">
-                    {rate.boardBasis ?? "Room only"}
-                  </p>
-                </div>
-                <p className="text-2xl font-black">
-                  {rate.currency} {rate.priceAmount.toLocaleString("en")}
-                </p>
-              </article>
-            ))}
-            {detail.rates.length === 0 ? (
-              <div className="rounded-lg border border-border-soft bg-surface p-6">
-                This hotel no longer has a room matching your search.
-              </div>
-            ) : null}
-          </div>
+          <StandaloneHotelRates
+            searchId={detail.searchId}
+            hotelId={hotelId}
+            rates={detail.rates}
+          />
         </div>
       </section>
     </main>

@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 
+import { handleStandaloneHotelStripePaymentSucceeded } from "@/server/hotels/booking";
 import { logServerError } from "@/server/http/response";
 import {
   updatePaymentStatusByBookingId,
@@ -53,6 +54,19 @@ async function handleStripeEvent(event: Stripe.Event) {
         paidAmountUnits: session.amount_total ?? null,
         paidCurrency: session.currency ?? null,
       });
+      if (session.metadata?.charge_type === "standalone_hotel_deposit") {
+        await handleStandaloneHotelStripePaymentSucceeded({
+          checkoutId: session.metadata.standalone_checkout_id,
+          stripeSessionId: session.id,
+          stripePaymentIntentId:
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : null,
+          amountTotal: session.amount_total,
+          currency: session.currency,
+          eventId: event.id,
+        });
+      }
       break;
     }
 

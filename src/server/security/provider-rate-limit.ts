@@ -63,11 +63,21 @@ export async function consumeProviderRateLimit({
       unavailable: false,
     };
   } catch (error) {
-    logServerError("provider.rate-limit", error);
-
+    // Extract detailed error info from Supabase error object
+    const errorDetails = extractSupabaseErrorDetails(error);
+    
     if (process.env.NODE_ENV !== "production") {
+      // In dev/local, log with details for debugging but don't spam with repeated calls
+      console.debug(
+        "[provider.rate-limit] RPC unavailable in dev mode, falling back to local limiting",
+        errorDetails,
+      );
+      // Fail open: use local in-memory limiting
       return consumeLocalLimit(bucketKey, routeKey, limit, windowSeconds);
     }
+
+    // Production: log the error for monitoring/alerting
+    logServerError("provider.rate-limit", error);
 
     // Provider-backed public requests fail closed when the shared limiter is
     // unavailable so a DB outage cannot exhaust the provider account quota.
@@ -78,6 +88,34 @@ export async function consumeProviderRateLimit({
       unavailable: true,
     };
   }
+}
+
+/**
+ * Extract detailed error information from Supabase RPC errors.
+ * Returns an object with code, message, details, and hint for debugging.
+ */
+function extractSupabaseErrorDetails(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== "object") {
+    return { error: "unknown error" };
+  }
+
+  const err = error as Record<string, unknown>;
+
+  const details: Record<string, unknown> = {};
+
+  // Standard Supabase error fields
+  if (err.code) details.code = err.code;
+  if (err.message) details.message = err.message;
+  if (err.details) details.details = err.details;
+  if (err.hint) details.hint = err.hint;
+
+  // Generic error fallback
+  if (err.name) details.name = err.name;
+  if (Object.keys(details).length === 0 && err.message === undefined) {
+    details.error = String(err);
+  }
+
+  return details;
 }
 
 function hashRequestIdentity(request: Request): string {

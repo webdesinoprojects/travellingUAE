@@ -39,6 +39,7 @@
   ],
   "exclude": [
     "node_modules",
+    "hotel-booking-review-*/**",
     "**/*.test.ts"
   ]
 }
