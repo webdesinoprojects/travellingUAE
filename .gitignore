@@ -88,3 +88,5 @@ del after use prompt.txt
 visa.txt
 ratehawk-questionnaire*.xlsx
 *.local.md
+
+ver.env
