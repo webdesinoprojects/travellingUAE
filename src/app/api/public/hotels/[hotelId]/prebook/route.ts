@@ -81,7 +81,7 @@ export async function POST(
   } catch (error) {
     if (error instanceof StandaloneHotelBookingError) {
       if (error.code) {
-        return prebookErrorResponse(error.status, error.code);
+        return prebookErrorResponse(error.status, error.code, error.providerDebug);
       }
       return jsonError(error.status, error.message);
     }
@@ -91,13 +91,23 @@ export async function POST(
   }
 }
 
-function prebookErrorResponse(status: number, code: string) {
-  return NextResponse.json(
-    {
-      ok: false,
-      code,
-      message: STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
-    },
-    { status },
-  );
+function prebookErrorResponse(
+  status: number,
+  code: string,
+  providerDebug?: StandaloneHotelBookingError["providerDebug"],
+) {
+  const body: Record<string, unknown> = {
+    ok: false,
+    code,
+    message: STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+  };
+
+  if (status === 409 && providerDebug) {
+    body.providerStage = providerDebug.providerStage;
+    body.providerStatus = providerDebug.providerStatus;
+    body.providerCode = providerDebug.providerCode;
+    body.providerMessage = providerDebug.providerMessage;
+  }
+
+  return NextResponse.json(body, { status });
 }

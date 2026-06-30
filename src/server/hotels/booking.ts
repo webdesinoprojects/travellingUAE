@@ -76,16 +76,29 @@ export type StandaloneHotelPrebookErrorCode =
   | "hotelpage_snapshot_missing"
   | "rate_not_found"
   | "selected_rate_missing_hash"
-  | "provider_prebook_error"
-  | "provider_prebook_missing_hash"
+  | "provider_prebook_http_error"
+  | "provider_prebook_rejected"
+  | "provider_prebook_parse_error"
+  | "provider_booking_form_http_error"
+  | "provider_booking_form_rejected"
+  | "provider_booking_form_parse_error"
   | "unsupported_payment_type"
   | "price_currency_mismatch"
   | "booking_session_create_failed";
 
 type StandalonePrebookProviderFailureLog = {
-  status?: string | null;
+  status?: string | number | null;
+  httpStatus?: number | null;
   code?: string | null;
   message?: string | null;
+  transportCode?: string | null;
+};
+
+export type StandaloneHotelProviderDebug = {
+  providerStage: "prebook" | "booking_form";
+  providerStatus: number | null;
+  providerCode: string | null;
+  providerMessage: string | null;
 };
 
 type StandalonePrebookFailureLog = {
@@ -199,12 +212,19 @@ export type StandaloneHotelPublicStatus = {
 export class StandaloneHotelBookingError extends Error {
   readonly status: number;
   readonly code: string | null;
+  readonly providerDebug: StandaloneHotelProviderDebug | null;
 
-  constructor(status: number, message: string, code: string | null = null) {
+  constructor(
+    status: number,
+    message: string,
+    code: string | null = null,
+    providerDebug: StandaloneHotelProviderDebug | null = null,
+  ) {
     super(message);
     this.name = "StandaloneHotelBookingError";
     this.status = status;
     this.code = code;
+    this.providerDebug = providerDebug;
   }
 }
 
@@ -343,30 +363,38 @@ export async function startStandaloneHotelPrebook(input: {
       input.signal,
     );
   } catch (error) {
-    const code = isProviderPrebookMissingHashError(error)
-      ? "provider_prebook_missing_hash"
-      : "provider_prebook_error";
-    logStandalonePrebookFailure(code, {
+    const failure = classifyProviderException("prebook", error);
+    logStandalonePrebookFailure(failure.code, {
       ...baseFailureLog,
-      provider: readProviderFailure(error),
+      provider: failure.provider,
       prebookReturnedProviderHash: false,
     });
     throw new StandaloneHotelBookingError(
       409,
       STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
-      code,
+      failure.code,
+      failure.debug,
     );
   }
 
   if (!isPrebookBookHash(prebook.prebookHash)) {
-    logStandalonePrebookFailure("provider_prebook_missing_hash", {
+    const debug = buildProviderDebug("prebook", {
+      code: "missing_prebook_hash",
+      message: "Provider prebook response missing booking hash",
+    });
+    logStandalonePrebookFailure("provider_prebook_parse_error", {
       ...baseFailureLog,
+      provider: {
+        code: debug.providerCode,
+        message: debug.providerMessage,
+      },
       prebookReturnedProviderHash: false,
     });
     throw new StandaloneHotelBookingError(
       409,
       STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
-      "provider_prebook_missing_hash",
+      "provider_prebook_parse_error",
+      debug,
     );
   }
 
@@ -937,15 +965,17 @@ async function createBookingFormWithRetries(input: {
     try {
       signal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.createBookingForm, body);
     } catch (error) {
-      logStandalonePrebookFailure("provider_prebook_error", {
+      const failure = classifyProviderException("booking_form", error);
+      logStandalonePrebookFailure(failure.code, {
         ...input.failureLog,
-        provider: readProviderFailure(error),
+        provider: failure.provider,
         paymentTypeNames: [],
       });
       throw new StandaloneHotelBookingError(
         409,
         STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
-        "provider_prebook_error",
+        failure.code,
+        failure.debug,
       );
     }
     const classification = classifyCreateBooking(signal);
@@ -966,7 +996,19 @@ async function createBookingFormWithRetries(input: {
     }
 
     if (classification.kind !== "retry") {
-      logStandalonePrebookFailure("provider_prebook_error", {
+      const kind = classification.kind === "failed" ? "rejected" : "parse_error";
+      const code = providerStageErrorCode("booking_form", kind);
+      const debug = buildProviderDebug("booking_form", readProviderFailure(signal), {
+        fallbackCode:
+          classification.kind === "failed"
+            ? (classification.code ?? "booking_form_rejected")
+            : "unsupported_booking_form_response",
+        fallbackMessage:
+          classification.kind === "failed"
+            ? "Provider rejected the booking form request"
+            : "Provider returned an unsupported booking form response",
+      });
+      logStandalonePrebookFailure(code, {
         ...input.failureLog,
         provider: readProviderFailure(signal),
         paymentTypeNames: [],
@@ -974,20 +1016,36 @@ async function createBookingFormWithRetries(input: {
       throw new StandaloneHotelBookingError(
         409,
         STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
-        "provider_prebook_error",
+        code,
+        debug,
       );
     }
   }
 
-  logStandalonePrebookFailure("provider_prebook_error", {
+  const exhaustedKind = isHttpLikeProviderFailure(lastProvider) ? "http_error" : "rejected";
+  const exhaustedCode = providerStageErrorCode("booking_form", exhaustedKind);
+  const exhaustedDebug = buildProviderDebug(
+    "booking_form",
+    lastProvider ?? { code: lastCode ?? "retry_exhausted" },
+    {
+      fallbackCode: lastCode ?? "retry_exhausted",
+      fallbackMessage: "Provider booking form retries were exhausted",
+    },
+  );
+  logStandalonePrebookFailure(exhaustedCode, {
     ...input.failureLog,
-    provider: lastProvider ?? { code: lastCode ?? "retry_exhausted" },
+    provider: {
+      status: exhaustedDebug.providerStatus,
+      code: exhaustedDebug.providerCode,
+      message: exhaustedDebug.providerMessage,
+    },
     paymentTypeNames: [],
   });
   throw new StandaloneHotelBookingError(
     409,
     STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
-    "provider_prebook_error",
+    exhaustedCode,
+    exhaustedDebug,
   );
 }
 
@@ -1733,31 +1791,110 @@ async function inspectStandalonePrebookSnapshot(input: {
   };
 }
 
-function readProviderFailure(value: unknown): StandalonePrebookProviderFailureLog {
-  if (!value || typeof value !== "object") {
-    return { message: value instanceof Error ? value.message : null };
+type ProviderFailureKind = "http_error" | "rejected" | "parse_error";
+
+function classifyProviderException(
+  stage: StandaloneHotelProviderDebug["providerStage"],
+  error: unknown,
+): {
+  code: StandaloneHotelPrebookErrorCode;
+  provider: StandalonePrebookProviderFailureLog;
+  debug: StandaloneHotelProviderDebug;
+} {
+  const provider = readProviderFailure(error);
+  let kind: ProviderFailureKind = "http_error";
+
+  if (provider.transportCode === "invalid_response") {
+    kind = "parse_error";
+  } else if (
+    provider.transportCode === "provider_error" ||
+    (typeof provider.httpStatus === "number" &&
+      provider.httpStatus >= 400 &&
+      provider.httpStatus < 500 &&
+      provider.httpStatus !== 401 &&
+      provider.httpStatus !== 403 &&
+      provider.httpStatus !== 429)
+  ) {
+    kind = "rejected";
   }
 
-  const record = value as Record<string, unknown>;
-  const status = record.status ?? record.httpStatus;
-  const code = record.providerCode ?? record.code ?? record.error;
-  const message = record.message;
-
   return {
-    status: safeLogText(status, 80),
-    code: safeLogText(code, 80),
-    message: safeLogText(message, 240),
+    code: providerStageErrorCode(stage, kind),
+    provider,
+    debug: buildProviderDebug(stage, provider),
   };
 }
 
-function isProviderPrebookMissingHashError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
+function providerStageErrorCode(
+  stage: StandaloneHotelProviderDebug["providerStage"],
+  kind: ProviderFailureKind,
+): StandaloneHotelPrebookErrorCode {
+  if (stage === "prebook") {
+    if (kind === "rejected") return "provider_prebook_rejected";
+    if (kind === "parse_error") return "provider_prebook_parse_error";
+    return "provider_prebook_http_error";
   }
 
-  const record = error as Record<string, unknown>;
-  const message = safeLogText(record.message, 240)?.toLowerCase() ?? "";
-  return message.includes("prebook") && message.includes("hash");
+  if (kind === "rejected") return "provider_booking_form_rejected";
+  if (kind === "parse_error") return "provider_booking_form_parse_error";
+  return "provider_booking_form_http_error";
+}
+
+function buildProviderDebug(
+  stage: StandaloneHotelProviderDebug["providerStage"],
+  provider: StandalonePrebookProviderFailureLog,
+  fallback?: { fallbackCode?: string | null; fallbackMessage?: string | null },
+): StandaloneHotelProviderDebug {
+  return {
+    providerStage: stage,
+    providerStatus: provider.httpStatus ?? null,
+    providerCode:
+      sanitizeProviderCode(provider.code) ??
+      sanitizeProviderCode(provider.transportCode) ??
+      sanitizeProviderCode(fallback?.fallbackCode),
+    providerMessage:
+      sanitizeProviderMessage(provider.message) ??
+      sanitizeProviderMessage(fallback?.fallbackMessage),
+  };
+}
+
+function isHttpLikeProviderFailure(
+  provider: StandalonePrebookProviderFailureLog | null,
+): boolean {
+  if (!provider) return true;
+  if (typeof provider.httpStatus === "number") {
+    return provider.httpStatus === 0 || provider.httpStatus === 429 || provider.httpStatus >= 500;
+  }
+
+  const code = sanitizeProviderCode(provider.code ?? provider.transportCode);
+  return code === "timeout" || code === "network_error" || code === "http_error";
+}
+
+function readProviderFailure(value: unknown): StandalonePrebookProviderFailureLog {
+  if (!value || typeof value !== "object") {
+    return { message: value instanceof Error ? sanitizeProviderMessage(value.message) : null };
+  }
+
+  const record = value as Record<string, unknown>;
+  const httpStatus = readHttpStatus(record.httpStatus);
+  const status = record.status ?? httpStatus;
+  const transportCode = sanitizeProviderCode(record.code);
+  const code = sanitizeProviderCode(record.providerCode ?? record.error ?? record.code);
+  const message = sanitizeProviderMessage(record.message);
+
+  return {
+    status: safeLogText(status, 80),
+    httpStatus,
+    code,
+    message,
+    transportCode,
+  };
+}
+
+function readHttpStatus(value: unknown): number | null {
+  const status = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(status) || status < 0 || status > 599) return null;
+  return status;
 }
 
 function readRecord(value: unknown, key: string): Record<string, unknown> | null {
@@ -1796,6 +1933,29 @@ function safeLogText(value: unknown, max: number): string | null {
 
   const text = String(value).trim();
   return text ? text.slice(0, max) : null;
+}
+
+function sanitizeProviderCode(value: unknown): string | null {
+  const text = safeLogText(value, 80);
+  if (!text) return null;
+
+  const cleaned = text.toLowerCase().replace(/[^a-z0-9_.:-]/g, "_");
+  return cleaned ? cleaned.slice(0, 80) : null;
+}
+
+function sanitizeProviderMessage(value: unknown): string | null {
+  const text = safeLogText(value, 600);
+  if (!text) return null;
+
+  const withoutHashes = text.replace(/\b[hp]-[A-Za-z0-9._:-]{4,}\b/g, "[redacted_hash]");
+  const withoutAuth = withoutHashes
+    .replace(/\b(Basic|Bearer)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(
+      /\b(token|secret|password|api[_-]?key|authorization)\b\s*[:=]\s*[^,\s}]+/gi,
+      "$1=[redacted]",
+    );
+
+  return withoutAuth.slice(0, 300);
 }
 
 function safePaymentTypeNames(values: string[]): string[] {
