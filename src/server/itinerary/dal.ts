@@ -58,6 +58,8 @@ const LIVE_OPTION_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LIVE_RESIDENCY = "ae";
 const DEFAULT_LIVE_NIGHTS = 2;
 const LIVE_OPTION_LIMIT = 12;
+const LOCAL_STATIC_OPTION_LIMIT = 60;
+const LOCAL_STATIC_OPTION_TTL_MS = 6 * 60 * 60 * 1000;
 
 type HotelSourceMode = "manual" | "live" | "hybrid";
 
@@ -635,12 +637,18 @@ async function getOptionsByType({
     hotelConfig,
     searchParams,
   );
+  const localOptions =
+    liveOptions.length > 0
+      ? []
+      : await getLocalStaticHotelOptions(context, segment, hotelConfig, searchParams);
 
   if (hotelConfig.mode === "live") {
-    return liveOptions;
+    return liveOptions.length > 0
+      ? liveOptions
+      : sortHotelOptions(localOptions, searchParams);
   }
 
-  return sortHotelOptions([...manualOptions, ...liveOptions], searchParams);
+  return sortHotelOptions([...manualOptions, ...liveOptions, ...localOptions], searchParams);
 }
 
 async function runManualOptionQuery({
@@ -1080,9 +1088,249 @@ async function getLiveHotelOptions(
   }
 }
 
+async function getLocalStaticHotelOptions(
+  context: TripContext,
+  segment: SegmentRow,
+  config: HotelSourceConfig,
+  searchParams: URLSearchParams,
+): Promise<SegmentOptionDTO[]> {
+  if (!config.regionId) {
+    return [];
+  }
+
+  try {
+    const providerId = await getOrCreateRateHawkProviderId();
+
+    if (!providerId) {
+      return [];
+    }
+
+    const { nights } = deriveStayDates(context, config);
+    const q = searchParams.get("q")?.trim() ?? "";
+    const stars = toPositiveInt(searchParams.get("stars"));
+    const sort = searchParams.get("sort") ?? "price";
+    const requestHash = buildStaticHotelRequestHash({
+      regionId: config.regionId,
+      language: "en",
+      nights,
+      q,
+      stars,
+      sort,
+    });
+    const admin = getSupabaseAdminClient();
+    const nowIso = new Date().toISOString();
+
+    const reuse = await admin
+      .from("trip_hotel_options")
+      .select(getOptionColumns("hotel"))
+      .eq("segment_id", segment.id)
+      .eq("provider_id", providerId)
+      .eq("status", "available")
+      .eq("metadata->>source", "ratehawk_static")
+      .eq("metadata->>request_hash", requestHash)
+      .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+      .order(sort === "rating" ? "star_rating" : "hotel_name", {
+        ascending: sort !== "rating",
+      })
+      .limit(LOCAL_STATIC_OPTION_LIMIT);
+
+    if (reuse.error) {
+      throw reuse.error;
+    }
+
+    const reuseRows = (reuse.data ?? []) as unknown as Array<
+      Record<string, unknown>
+    >;
+
+    if (reuseRows.length > 0) {
+      return reuseRows.map(mapStaticHotelRow);
+    }
+
+    const hotels = await readLocalStaticHotels({
+      providerId,
+      regionId: config.regionId,
+      language: "en",
+      query: q,
+      stars,
+      sort,
+    });
+
+    if (hotels.length === 0) {
+      return [];
+    }
+
+    const expirePrevious = await admin
+      .from("trip_hotel_options")
+      .update({ status: "expired" })
+      .eq("segment_id", segment.id)
+      .eq("provider_id", providerId)
+      .eq("status", "available")
+      .eq("metadata->>source", "ratehawk_static");
+
+    if (expirePrevious.error) {
+      throw expirePrevious.error;
+    }
+
+    const expiresAt = new Date(Date.now() + LOCAL_STATIC_OPTION_TTL_MS).toISOString();
+    const inserted = await admin
+      .from("trip_hotel_options")
+      .insert(
+        hotels.map((hotel) => ({
+          trip_id: context.tripId,
+          segment_id: segment.id,
+          provider_id: providerId,
+          quote_snapshot_id: null,
+          hotel_name: hotel.name,
+          address: hotel.address,
+          star_rating: clampStarRating(hotel.starRating),
+          room_name: null,
+          board_basis: null,
+          check_in_day_offset: 0,
+          check_out_day_offset: nights,
+          nights,
+          latitude: hotel.latitude,
+          longitude: hotel.longitude,
+          image_url: hotel.imageUrl,
+          guest_rating: null,
+          amenities: hotel.amenities,
+          price_delta_amount: 0,
+          currency: context.currency,
+          is_default: false,
+          status: "available",
+          expires_at: expiresAt,
+          metadata: {
+            request_hash: requestHash,
+            source: "ratehawk_static",
+            hotel_id: hotel.hotelId,
+            hid: hotel.hid,
+            region_id: config.regionId,
+          },
+        })),
+      )
+      .select(getOptionColumns("hotel"));
+
+    if (inserted.error) {
+      throw inserted.error;
+    }
+
+    return ((inserted.data ?? []) as unknown as Array<
+      Record<string, unknown>
+    >).map(mapStaticHotelRow);
+  } catch (error) {
+    logServerError("itinerary.hotel.static", error);
+    return [];
+  }
+}
+
 function mapLiveHotelRow(row: Record<string, unknown>): SegmentOptionDTO {
   const dto = mapOption("hotel", row) as HotelOptionDTO;
   return { ...dto, isLive: true };
+}
+
+function mapStaticHotelRow(row: Record<string, unknown>): SegmentOptionDTO {
+  const dto = mapOption("hotel", row) as HotelOptionDTO;
+  return { ...dto, isLive: false };
+}
+
+type LocalStaticHotelOption = {
+  hotelId: string;
+  hid: number | null;
+  name: string;
+  address: string | null;
+  starRating: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  imageUrl: string | null;
+  amenities: string[];
+};
+
+async function readLocalStaticHotels({
+  providerId,
+  regionId,
+  language,
+  query,
+  stars,
+  sort,
+}: {
+  providerId: string;
+  regionId: number;
+  language: string;
+  query: string;
+  stars: number | null;
+  sort: string;
+}): Promise<LocalStaticHotelOption[]> {
+  let dbQuery = getSupabaseAdminClient()
+    .from("provider_hotel_content")
+    .select(
+      "hotel_id,hid,name,address,star_rating,latitude,longitude,primary_image_url,amenities",
+    )
+    .eq("provider_id", providerId)
+    .eq("language", language)
+    .eq("region_id", regionId);
+
+  const cleanedQuery = query.trim().slice(0, 80);
+  if (cleanedQuery) {
+    dbQuery = dbQuery.ilike("name", `%${cleanedQuery}%`);
+  }
+
+  if (stars) {
+    dbQuery = dbQuery.gte("star_rating", stars);
+  }
+
+  dbQuery =
+    sort === "rating"
+      ? dbQuery.order("star_rating", { ascending: false }).order("name", { ascending: true })
+      : dbQuery.order("name", { ascending: true });
+
+  const result = await dbQuery.limit(LOCAL_STATIC_OPTION_LIMIT);
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return ((result.data ?? []) as unknown as Array<Record<string, unknown>>)
+    .map((row): LocalStaticHotelOption | null => {
+      const hotelId = readOptionalText(row.hotel_id);
+      const name = readOptionalText(row.name);
+
+      if (!hotelId || !name) {
+        return null;
+      }
+
+      return {
+        hotelId,
+        hid: toOptionalNumberValue(row.hid),
+        name,
+        address: readOptionalText(row.address),
+        starRating: toOptionalNumberValue(row.star_rating),
+        latitude: toOptionalNumberValue(row.latitude),
+        longitude: toOptionalNumberValue(row.longitude),
+        imageUrl: readHttpsUrl(row.primary_image_url),
+        amenities: readTextArray(row.amenities).slice(0, 8),
+      };
+    })
+    .filter((row): row is LocalStaticHotelOption => row !== null);
+}
+
+function buildStaticHotelRequestHash(input: {
+  regionId: number;
+  language: string;
+  nights: number;
+  q: string;
+  stars: number | null;
+  sort: string;
+}) {
+  return createHash("sha1")
+    .update(JSON.stringify({
+      source: "ratehawk_static",
+      regionId: input.regionId,
+      language: input.language,
+      nights: input.nights,
+      q: input.q.trim().toLowerCase().slice(0, 80),
+      stars: input.stars,
+      sort: input.sort,
+    }))
+    .digest("hex");
 }
 
 function sortHotelOptions(
@@ -1130,6 +1378,34 @@ function toPositiveInt(value: unknown): number | null {
         : Number.NaN;
 
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function readOptionalText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toOptionalNumberValue(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readHttpsUrl(value: unknown): string | null {
+  const text = readOptionalText(value);
+  if (!text) return null;
+
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function readTextArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(readOptionalText)
+    .filter((entry): entry is string => entry !== null);
 }
 
 async function getAdminOption(
