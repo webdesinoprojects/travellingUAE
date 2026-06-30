@@ -33,6 +33,7 @@ import { rateHawkBookingRequest } from "@/server/providers/ratehawk/client";
 import {
   mapMealToBoardBasis,
   prebookHotelRate,
+  type HotelPrebookResult,
 } from "@/server/providers/ratehawk/hotels";
 import {
   BOOKING_ENDPOINTS,
@@ -67,6 +68,37 @@ import type { CheckoutGuestRoom } from "@/types/itinerary";
 
 export const HOTEL_CHECKOUT_COOKIE = "flytime_hotel_checkout";
 export const HOTEL_CHECKOUT_TTL_SECONDS = 30 * 60;
+export const STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE =
+  "The hotel rate cannot be booked right now.";
+
+export type StandaloneHotelPrebookErrorCode =
+  | "invalid_payload"
+  | "hotelpage_snapshot_missing"
+  | "rate_not_found"
+  | "selected_rate_missing_hash"
+  | "provider_prebook_error"
+  | "provider_prebook_missing_hash"
+  | "unsupported_payment_type"
+  | "price_currency_mismatch"
+  | "booking_session_create_failed";
+
+type StandalonePrebookProviderFailureLog = {
+  status?: string | null;
+  code?: string | null;
+  message?: string | null;
+};
+
+type StandalonePrebookFailureLog = {
+  hotelId?: string | null;
+  searchId?: string | null;
+  rateId?: string | null;
+  provider?: StandalonePrebookProviderFailureLog | null;
+  selectedRateExists?: boolean | null;
+  selectedRateHasProviderHash?: boolean | null;
+  hotelpageSnapshotExists?: boolean | null;
+  prebookReturnedProviderHash?: boolean | null;
+  paymentTypeNames?: string[] | null;
+};
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
@@ -166,12 +198,38 @@ export type StandaloneHotelPublicStatus = {
 
 export class StandaloneHotelBookingError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "StandaloneHotelBookingError";
     this.status = status;
+    this.code = code;
   }
+}
+
+export function logStandalonePrebookFailure(
+  code: StandaloneHotelPrebookErrorCode,
+  context: StandalonePrebookFailureLog,
+): void {
+  console.error("[standalone.hotel.prebook.failure]", {
+    code,
+    hotelId: safeLogText(context.hotelId, 160),
+    searchId: safeLogText(context.searchId, 80),
+    rateId: safeLogText(context.rateId, 80),
+    provider: context.provider
+      ? {
+          status: safeLogText(context.provider.status, 80),
+          code: safeLogText(context.provider.code, 80),
+          message: safeLogText(context.provider.message, 240),
+        }
+      : null,
+    selectedRateExists: context.selectedRateExists ?? null,
+    selectedRateHasProviderHash: context.selectedRateHasProviderHash ?? null,
+    hotelpageSnapshotExists: context.hotelpageSnapshotExists ?? null,
+    prebookReturnedProviderHash: context.prebookReturnedProviderHash ?? null,
+    paymentTypeNames: safePaymentTypeNames(context.paymentTypeNames ?? []),
+  });
 }
 
 export function isStandaloneHotelBookingEnabled(): boolean {
@@ -234,30 +292,93 @@ export async function startStandaloneHotelPrebook(input: {
     stage: "hotelpage",
   });
   if (!hotelpageQuote) {
-    throw new StandaloneHotelBookingError(404, "This room rate is no longer available.");
+    const snapshotDebug = await inspectStandalonePrebookSnapshot({
+      searchId: session.id,
+      hotelId: input.hotelId,
+      rateId: input.rateId,
+    });
+    const code =
+      snapshotDebug.selectedRateExists === false
+        ? "rate_not_found"
+        : "hotelpage_snapshot_missing";
+    logStandalonePrebookFailure(code, {
+      hotelId: input.hotelId,
+      searchId: input.searchId,
+      rateId: input.rateId,
+      ...snapshotDebug,
+    });
+    throw new StandaloneHotelBookingError(
+      409,
+      STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+      code,
+    );
   }
 
   const hotelpageHash =
     typeof hotelpageQuote.metadata?.book_hash === "string"
       ? hotelpageQuote.metadata.book_hash
       : null;
+  const baseFailureLog = {
+    hotelId: input.hotelId,
+    searchId: input.searchId,
+    rateId: input.rateId,
+    selectedRateExists: true,
+    selectedRateHasProviderHash: isHotelPageBookHash(hotelpageHash),
+    hotelpageSnapshotExists: true,
+  } satisfies StandalonePrebookFailureLog;
   if (!isHotelPageBookHash(hotelpageHash)) {
-    throw new StandaloneHotelBookingError(409, "This room rate cannot be prebooked.");
+    logStandalonePrebookFailure("selected_rate_missing_hash", baseFailureLog);
+    throw new StandaloneHotelBookingError(
+      409,
+      STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+      "selected_rate_missing_hash",
+    );
   }
 
-  const prebook = await prebookHotelRate(
-    hotelpageHash,
-    session.language,
-    input.signal,
-  );
+  let prebook: HotelPrebookResult;
+  try {
+    prebook = await prebookHotelRate(
+      hotelpageHash,
+      session.language,
+      input.signal,
+    );
+  } catch (error) {
+    const code = isProviderPrebookMissingHashError(error)
+      ? "provider_prebook_missing_hash"
+      : "provider_prebook_error";
+    logStandalonePrebookFailure(code, {
+      ...baseFailureLog,
+      provider: readProviderFailure(error),
+      prebookReturnedProviderHash: false,
+    });
+    throw new StandaloneHotelBookingError(
+      409,
+      STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+      code,
+    );
+  }
+
   if (!isPrebookBookHash(prebook.prebookHash)) {
-    throw new StandaloneHotelBookingError(409, "The provider did not return a prebook token.");
+    logStandalonePrebookFailure("provider_prebook_missing_hash", {
+      ...baseFailureLog,
+      prebookReturnedProviderHash: false,
+    });
+    throw new StandaloneHotelBookingError(
+      409,
+      STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+      "provider_prebook_missing_hash",
+    );
   }
 
+  const prebookFailureLog = {
+    ...baseFailureLog,
+    prebookReturnedProviderHash: true,
+  } satisfies StandalonePrebookFailureLog;
   const form = await createBookingFormWithRetries({
     prebookHash: prebook.prebookHash,
     language: session.language,
     userIp,
+    failureLog: prebookFailureLog,
   });
   const deposit = selectDepositPaymentType(form.paymentTypes);
   const checkoutToken = randomBytes(32).toString("base64url");
@@ -266,7 +387,24 @@ export async function startStandaloneHotelPrebook(input: {
   ).toISOString();
   const priceAtHotelpage = money(hotelpageQuote.price_amount);
   const priceAtPrebook = prebook.priceAmount;
-  const currency = prebook.currency ?? hotelpageQuote.currency ?? session.currency;
+  const hotelpageCurrency = readText(hotelpageQuote.currency) ?? session.currency;
+  const prebookCurrency = readText(prebook.currency);
+  if (
+    prebookCurrency &&
+    hotelpageCurrency &&
+    prebookCurrency.toUpperCase() !== hotelpageCurrency.toUpperCase()
+  ) {
+    logStandalonePrebookFailure("price_currency_mismatch", {
+      ...prebookFailureLog,
+      paymentTypeNames: form.paymentTypes.map((paymentType) => paymentType.type),
+    });
+    throw new StandaloneHotelBookingError(
+      409,
+      STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+      "price_currency_mismatch",
+    );
+  }
+  const currency = prebookCurrency ?? hotelpageCurrency;
   const priceChanged = Math.abs(priceAtHotelpage - priceAtPrebook) >= 0.01;
   const searchQuote = await readStandaloneSearchQuote(session.id, input.hotelId);
   const hotelName =
@@ -317,7 +455,15 @@ export async function startStandaloneHotelPrebook(input: {
     .select("id")
     .single();
   if (prebookSnapshot.error || !prebookSnapshot.data) {
-    throw prebookSnapshot.error ?? new Error("Prebook snapshot was not stored");
+    logStandalonePrebookFailure("booking_session_create_failed", {
+      ...prebookFailureLog,
+      paymentTypeNames: form.paymentTypes.map((paymentType) => paymentType.type),
+    });
+    throw new StandaloneHotelBookingError(
+      500,
+      STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+      "booking_session_create_failed",
+    );
   }
 
   const status: StandaloneStatus = deposit ? "form_created" : "unsupported_payment";
@@ -362,7 +508,15 @@ export async function startStandaloneHotelPrebook(input: {
     .select("id")
     .single();
   if (insert.error || !insert.data) {
-    throw insert.error ?? new Error("Hotel checkout session was not created");
+    logStandalonePrebookFailure("booking_session_create_failed", {
+      ...prebookFailureLog,
+      paymentTypeNames: form.paymentTypes.map((paymentType) => paymentType.type),
+    });
+    throw new StandaloneHotelBookingError(
+      500,
+      STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+      "booking_session_create_failed",
+    );
   }
 
   const checkoutId = (insert.data as { id: string }).id;
@@ -375,7 +529,7 @@ export async function startStandaloneHotelPrebook(input: {
       ? null
       : unsupportedPaymentReason(form.paymentTypes.map((p) => p.type)),
     priceChanged,
-    oldPrice: { amount: priceAtHotelpage, currency: hotelpageQuote.currency },
+    oldPrice: { amount: priceAtHotelpage, currency: hotelpageCurrency },
     newPrice: { amount: priceAtPrebook, currency },
   };
 }
@@ -757,6 +911,7 @@ async function createBookingFormWithRetries(input: {
   prebookHash: string;
   language: string;
   userIp: string;
+  failureLog: StandalonePrebookFailureLog;
 }): Promise<{
   partnerOrderId: string;
   orderId: string | null;
@@ -767,6 +922,7 @@ async function createBookingFormWithRetries(input: {
   upsellData: Record<string, unknown> | null;
 }> {
   let lastCode: string | null = null;
+  let lastProvider: StandalonePrebookProviderFailureLog | null = null;
 
   for (let attempt = 0; attempt < MAX_CREATE_BOOKING_RETRIES; attempt += 1) {
     const partnerOrderId = generatePartnerOrderId();
@@ -777,9 +933,24 @@ async function createBookingFormWithRetries(input: {
       userIp: input.userIp,
     });
 
-    const signal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.createBookingForm, body);
+    let signal: Awaited<ReturnType<typeof rateHawkBookingRequest>>;
+    try {
+      signal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.createBookingForm, body);
+    } catch (error) {
+      logStandalonePrebookFailure("provider_prebook_error", {
+        ...input.failureLog,
+        provider: readProviderFailure(error),
+        paymentTypeNames: [],
+      });
+      throw new StandaloneHotelBookingError(
+        409,
+        STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+        "provider_prebook_error",
+      );
+    }
     const classification = classifyCreateBooking(signal);
     lastCode = signal.error ?? signal.status;
+    lastProvider = readProviderFailure(signal);
 
     if (classification.kind === "proceed") {
       const parsed = parseCreateBookingResponse(signal.data);
@@ -795,18 +966,28 @@ async function createBookingFormWithRetries(input: {
     }
 
     if (classification.kind !== "retry") {
+      logStandalonePrebookFailure("provider_prebook_error", {
+        ...input.failureLog,
+        provider: readProviderFailure(signal),
+        paymentTypeNames: [],
+      });
       throw new StandaloneHotelBookingError(
         409,
-        classification.kind === "failed"
-          ? "The hotel rate cannot be booked right now."
-          : "The provider returned an unsupported booking response.",
+        STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+        "provider_prebook_error",
       );
     }
   }
 
+  logStandalonePrebookFailure("provider_prebook_error", {
+    ...input.failureLog,
+    provider: lastProvider ?? { code: lastCode ?? "retry_exhausted" },
+    paymentTypeNames: [],
+  });
   throw new StandaloneHotelBookingError(
     409,
-    `The provider could not create a booking form (${lastCode ?? "retry_exhausted"}).`,
+    STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+    "provider_prebook_error",
   );
 }
 
@@ -1495,6 +1676,90 @@ async function readStandaloneSearchQuote(
   return (result.data as { safe_payload: Record<string, unknown> | null } | null) ?? null;
 }
 
+async function inspectStandalonePrebookSnapshot(input: {
+  searchId: string;
+  hotelId: string;
+  rateId: string;
+}): Promise<{
+  selectedRateExists: boolean | null;
+  selectedRateHasProviderHash: boolean | null;
+  hotelpageSnapshotExists: boolean | null;
+}> {
+  const result = await getSupabaseAdminClient()
+    .from("provider_quote_snapshots")
+    .select("id,search_session_id,provider_reference,status,safe_payload,metadata,expires_at")
+    .eq("id", input.rateId)
+    .eq("service_type", "hotel")
+    .maybeSingle();
+
+  if (result.error) {
+    return {
+      selectedRateExists: null,
+      selectedRateHasProviderHash: null,
+      hotelpageSnapshotExists: null,
+    };
+  }
+
+  const row = result.data as Record<string, unknown> | null;
+  if (!row) {
+    return {
+      selectedRateExists: false,
+      selectedRateHasProviderHash: false,
+      hotelpageSnapshotExists: false,
+    };
+  }
+
+  const safePayload =
+    row.safe_payload && typeof row.safe_payload === "object"
+      ? (row.safe_payload as Record<string, unknown>)
+      : null;
+  const metadata =
+    row.metadata && typeof row.metadata === "object"
+      ? (row.metadata as Record<string, unknown>)
+      : null;
+  const expiresAt = readText(row.expires_at);
+  const isUnexpired = expiresAt ? new Date(expiresAt).getTime() > Date.now() : false;
+  const isHotelpageSnapshot =
+    row.search_session_id === input.searchId &&
+    row.provider_reference === input.hotelId &&
+    row.status === "available" &&
+    safePayload?.stage === "hotelpage" &&
+    isUnexpired;
+
+  return {
+    selectedRateExists: true,
+    selectedRateHasProviderHash: isHotelPageBookHash(metadata?.book_hash),
+    hotelpageSnapshotExists: isHotelpageSnapshot,
+  };
+}
+
+function readProviderFailure(value: unknown): StandalonePrebookProviderFailureLog {
+  if (!value || typeof value !== "object") {
+    return { message: value instanceof Error ? value.message : null };
+  }
+
+  const record = value as Record<string, unknown>;
+  const status = record.status ?? record.httpStatus;
+  const code = record.providerCode ?? record.code ?? record.error;
+  const message = record.message;
+
+  return {
+    status: safeLogText(status, 80),
+    code: safeLogText(code, 80),
+    message: safeLogText(message, 240),
+  };
+}
+
+function isProviderPrebookMissingHashError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const record = error as Record<string, unknown>;
+  const message = safeLogText(record.message, 240)?.toLowerCase() ?? "";
+  return message.includes("prebook") && message.includes("hash");
+}
+
 function readRecord(value: unknown, key: string): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
   const child = (value as Record<string, unknown>)[key];
@@ -1518,6 +1783,26 @@ function valueOrNull(value: unknown): string | number | null {
 
 function readText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function safeLogText(value: unknown, max: number): string | null {
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean"
+  ) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  return text ? text.slice(0, max) : null;
+}
+
+function safePaymentTypeNames(values: string[]): string[] {
+  const names = values
+    .map((value) => safeLogText(value, 80))
+    .filter((value): value is string => value !== null);
+  return Array.from(new Set(names)).slice(0, 20);
 }
 
 function cleanRequiredText(value: string, key: string): string {

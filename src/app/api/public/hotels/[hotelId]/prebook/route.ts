@@ -1,8 +1,10 @@
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 import {
   getStandaloneCheckoutCookieOptions,
   HOTEL_CHECKOUT_COOKIE,
+  logStandalonePrebookFailure,
+  STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
   StandaloneHotelBookingError,
   startStandaloneHotelPrebook,
 } from "@/server/hotels/booking";
@@ -37,9 +39,17 @@ export async function POST(
 
   try {
     const { hotelId } = await context.params;
-    const body = await readJsonObject(request);
-    const searchId = readString(body, "searchId", { required: true, max: 80 })!;
-    const rateId = readString(body, "rateId", { required: true, max: 80 })!;
+    let searchId: string;
+    let rateId: string;
+
+    try {
+      const body = await readJsonObject(request);
+      searchId = readString(body, "searchId", { required: true, max: 80 })!;
+      rateId = readString(body, "rateId", { required: true, max: 80 })!;
+    } catch {
+      logStandalonePrebookFailure("invalid_payload", { hotelId });
+      return prebookErrorResponse(400, "invalid_payload");
+    }
 
     const result = await startStandaloneHotelPrebook({
       searchId,
@@ -70,10 +80,24 @@ export async function POST(
     return response;
   } catch (error) {
     if (error instanceof StandaloneHotelBookingError) {
+      if (error.code) {
+        return prebookErrorResponse(error.status, error.code);
+      }
       return jsonError(error.status, error.message);
     }
     const safe = mapProviderError(error);
     logServerError("api.public.hotels.prebook", error);
     return jsonError(safe.status, safe.message);
   }
+}
+
+function prebookErrorResponse(status: number, code: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code,
+      message: STANDALONE_PREBOOK_PUBLIC_ERROR_MESSAGE,
+    },
+    { status },
+  );
 }
