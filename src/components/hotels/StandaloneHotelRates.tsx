@@ -1,7 +1,6 @@
 "use client";
 
 import { AlertCircle, BedDouble, Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import type { HotelRateDTO } from "@/types/hotels";
@@ -28,7 +27,6 @@ type PrebookResponse = {
 };
 
 export function StandaloneHotelRates({ searchId, hotelId, rates }: Props) {
-  const router = useRouter();
   const [state, setState] = useState<PrebookState>({ rateId: null, error: null });
 
   async function selectRate(rateId: string) {
@@ -53,7 +51,7 @@ export function StandaloneHotelRates({ searchId, hotelId, rates }: Props) {
         return;
       }
 
-      router.push(payload.data.checkoutUrl);
+      window.location.assign(payload.data.checkoutUrl);
     } catch {
       setState({
         rateId: null,

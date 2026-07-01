@@ -202,6 +202,14 @@ export type StandaloneHotelCheckoutSummary = {
   isGenderSpecificationRequired: boolean;
 };
 
+export type StandaloneCheckoutLookupDebug = {
+  checkoutTokenPresent: boolean;
+  tokenHashGenerated: boolean;
+  sessionFound: boolean;
+  expiresAtExpired: boolean | null;
+  sessionStatus: StandaloneStatus | null;
+};
+
 export type StandaloneHotelPublicStatus = {
   checkoutId: string;
   state: "pending" | "in_progress" | "confirmed" | "failed" | "review" | "unsupported";
@@ -250,6 +258,10 @@ export function logStandalonePrebookFailure(
     prebookReturnedProviderHash: context.prebookReturnedProviderHash ?? null,
     paymentTypeNames: safePaymentTypeNames(context.paymentTypeNames ?? []),
   });
+}
+
+function logStandaloneCheckoutLookup(debug: StandaloneCheckoutLookupDebug): void {
+  console.error("[standalone.hotel.checkout.lookup]", debug);
 }
 
 export function isStandaloneHotelBookingEnabled(): boolean {
@@ -601,6 +613,53 @@ export async function getStandaloneHotelCheckoutSummary(
           },
     isGenderSpecificationRequired: row.is_gender_specification_required,
   };
+}
+
+export async function inspectStandaloneHotelCheckoutLookup(
+  checkoutId: string,
+  checkoutToken: string | undefined,
+): Promise<StandaloneCheckoutLookupDebug> {
+  const checkoutTokenPresent = Boolean(checkoutToken);
+  const tokenHash =
+    checkoutToken && checkoutToken.length <= 160 ? hashToken(checkoutToken) : null;
+  const debug: StandaloneCheckoutLookupDebug = {
+    checkoutTokenPresent,
+    tokenHashGenerated: Boolean(tokenHash),
+    sessionFound: false,
+    expiresAtExpired: null,
+    sessionStatus: null,
+  };
+
+  if (!UUID_RE.test(checkoutId)) {
+    logStandaloneCheckoutLookup(debug);
+    return debug;
+  }
+
+  const result = await getSupabaseAdminClient()
+    .from("standalone_hotel_booking_sessions")
+    .select("checkout_token_hash,status,expires_at")
+    .eq("id", checkoutId)
+    .maybeSingle();
+
+  if (result.error) throw result.error;
+
+  const row = (result.data ?? null) as Record<string, unknown> | null;
+  if (!row) {
+    logStandaloneCheckoutLookup(debug);
+    return debug;
+  }
+
+  const expiresAt = readText(row.expires_at);
+  const expiresAtMs = expiresAt ? new Date(expiresAt).getTime() : Number.NaN;
+  const expired = Number.isFinite(expiresAtMs) ? expiresAtMs <= Date.now() : null;
+  const storedHash = readText(row.checkout_token_hash);
+
+  debug.expiresAtExpired = expired;
+  debug.sessionStatus = normalizeStatus(row.status);
+  debug.sessionFound = Boolean(tokenHash && storedHash === tokenHash && expired === false);
+
+  logStandaloneCheckoutLookup(debug);
+  return debug;
 }
 
 export async function createStandaloneHotelStripeSession(input: {

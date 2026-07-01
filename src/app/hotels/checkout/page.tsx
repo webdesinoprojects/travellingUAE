@@ -6,6 +6,8 @@ import { StandaloneHotelCheckoutForm } from "@/components/hotels/StandaloneHotel
 import {
   getStandaloneHotelCheckoutSummary,
   HOTEL_CHECKOUT_COOKIE,
+  inspectStandaloneHotelCheckoutLookup,
+  type StandaloneCheckoutLookupDebug,
 } from "@/server/hotels/booking";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +24,11 @@ export default async function StandaloneHotelCheckoutPage({
   );
 
   if (!summary) {
+    const debug = await inspectStandaloneHotelCheckoutLookup(
+      checkout,
+      cookieStore.get(HOTEL_CHECKOUT_COOKIE)?.value,
+    );
+
     return (
       <main className="grid min-h-screen place-items-center bg-background px-4 pt-24">
         <div className="rounded-lg border border-border-soft bg-surface p-8 text-center">
@@ -29,6 +36,7 @@ export default async function StandaloneHotelCheckoutPage({
           <Link href="/?service=hotel#travel-search" className="mt-5 inline-flex font-extrabold text-brand-blue">
             Start a new hotel search
           </Link>
+          <CheckoutLookupDebug debug={debug} />
         </div>
       </main>
     );
@@ -93,4 +101,40 @@ export default async function StandaloneHotelCheckoutPage({
       </section>
     </main>
   );
+}
+
+function CheckoutLookupDebug({
+  debug,
+}: {
+  debug: StandaloneCheckoutLookupDebug;
+}) {
+  return (
+    <dl className="mt-6 grid gap-2 rounded-lg border border-border-soft bg-surface-muted p-4 text-left text-xs font-semibold text-brand-navy/65 dark:text-white/65">
+      <div className="flex justify-between gap-4">
+        <dt>checkout token present</dt>
+        <dd>{formatDebugValue(debug.checkoutTokenPresent)}</dd>
+      </div>
+      <div className="flex justify-between gap-4">
+        <dt>token hash generated</dt>
+        <dd>{formatDebugValue(debug.tokenHashGenerated)}</dd>
+      </div>
+      <div className="flex justify-between gap-4">
+        <dt>session found</dt>
+        <dd>{formatDebugValue(debug.sessionFound)}</dd>
+      </div>
+      <div className="flex justify-between gap-4">
+        <dt>expires_at expired</dt>
+        <dd>{formatDebugValue(debug.expiresAtExpired)}</dd>
+      </div>
+      <div className="flex justify-between gap-4">
+        <dt>session status</dt>
+        <dd>{debug.sessionStatus ?? "unknown"}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function formatDebugValue(value: boolean | null) {
+  if (value === null) return "unknown";
+  return value ? "true" : "false";
 }
