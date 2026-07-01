@@ -292,7 +292,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
           <TextInput name="email" label="Email" type="email" autoComplete="email" required />
           <TextInput name="phone" label="Phone / WhatsApp" type="tel" autoComplete="tel" required />
         </div>
-        <label className="grid gap-1.5">
+        <label className="grid gap-1.5 min-w-0">
           <span className="text-sm font-extrabold text-brand-navy dark:text-white">
             Comment
           </span>
@@ -317,7 +317,10 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
             </h3>
             <div className="mt-4 grid gap-4">
               {room.guests.map((guest, guestIndex) => (
-                <div key={guestIndex} className="grid gap-3 md:grid-cols-[1fr_1fr_180px]">
+                <div
+                  key={guestIndex}
+                  className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,11rem)]"
+                >
                   <TextInput
                     label={`${guest.kind === "child" ? "Child" : "Adult"} ${guestIndex + 1} first name`}
                     value={guest.firstName}
@@ -330,7 +333,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
                     onChange={(value) => updateGuest(roomIndex, guestIndex, "lastName", value)}
                     required
                   />
-                  <label className="grid gap-1.5">
+                  <label className="grid gap-1.5 min-w-0">
                     <span className="text-sm font-extrabold text-brand-navy dark:text-white">
                       Gender
                     </span>
@@ -340,7 +343,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
                       onChange={(event) =>
                         updateGuest(roomIndex, guestIndex, "gender", event.target.value)
                       }
-                      className="h-11 rounded-lg border border-border-soft bg-surface px-3 text-sm font-bold text-brand-navy outline-none focus:border-brand-blue disabled:opacity-60 dark:bg-black dark:text-white"
+                      className="h-11 w-full min-w-0 rounded-lg border border-border-soft bg-surface px-3 text-sm font-bold text-brand-navy outline-none focus:border-brand-blue disabled:opacity-60 dark:bg-black dark:text-white"
                     >
                       <option value="">
                         {summary.isGenderSpecificationRequired ? "Select" : "Not required"}
@@ -386,7 +389,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
             inputMode="numeric"
             required
           />
-          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr]">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <TextInput
               label="Expiry month (MM)"
               value={card.expiryMonth}
@@ -428,7 +431,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
       <button
         type="submit"
         disabled={!payable || busy}
-        className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-brand-blue px-6 text-sm font-extrabold text-white transition hover:bg-brand-blue-strong disabled:cursor-not-allowed disabled:opacity-55 dark:bg-brand-sand dark:text-brand-navy"
+        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-6 text-sm font-extrabold text-white transition hover:bg-brand-blue-strong disabled:cursor-not-allowed disabled:opacity-55 dark:bg-brand-sand dark:text-brand-navy"
       >
         {busy ? (
           <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -469,7 +472,7 @@ function TextInput({
   onChange?: (value: string) => void;
 }) {
   return (
-    <label className="grid gap-1.5">
+    <label className="grid gap-1.5 min-w-0">
       <span className="text-sm font-extrabold text-brand-navy dark:text-white">
         {label}
         {required ? <span className="ml-1 text-brand-blue dark:text-brand-sand">*</span> : null}
@@ -483,7 +486,7 @@ function TextInput({
         inputMode={inputMode}
         placeholder={placeholder}
         onChange={onChange ? (event) => onChange(event.target.value) : undefined}
-        className="h-11 rounded-lg border border-border-soft bg-surface px-3.5 text-sm text-brand-navy outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:ring-brand-sand/30 dark:focus:border-brand-sand"
+        className="h-11 w-full min-w-0 rounded-lg border border-border-soft bg-surface px-3.5 text-sm text-brand-navy outline-none ring-brand-blue/30 transition focus:border-brand-blue focus:ring-2 dark:bg-white/[0.05] dark:text-white dark:ring-brand-sand/30 dark:focus:border-brand-sand"
       />
     </label>
   );

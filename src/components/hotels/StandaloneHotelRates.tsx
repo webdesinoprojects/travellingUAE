@@ -76,14 +76,24 @@ export function StandaloneHotelRates({ searchId, hotelId, rates }: Props) {
             key={rate.rateId}
             className="flex flex-col gap-4 rounded-lg border border-border-soft bg-surface p-5 sm:flex-row sm:items-center sm:justify-between"
           >
-            <div>
+            <div className="min-w-0">
               <h3 className="flex items-center gap-2 text-lg font-black">
-                <BedDouble className="size-5 text-brand-blue" aria-hidden="true" />
-                {rate.roomName ?? "Hotel room"}
+                <BedDouble className="size-5 shrink-0 text-brand-blue" aria-hidden="true" />
+                <span className="min-w-0 break-words">{rate.roomName ?? "Hotel room"}</span>
               </h3>
               <p className="mt-2 text-sm font-semibold text-brand-navy/60 dark:text-white/60">
                 {rate.boardBasis ?? "Room only"}
               </p>
+              {/* Taxes/fees + cancellation shown from returned rate data only. Standalone
+                  rate cards do not carry itemised taxes or final cancellation terms until
+                  prebook, so these are honest fallbacks (never invented values). */}
+              <div className="mt-3 grid gap-1 text-xs font-semibold text-brand-navy/50 dark:text-white/50">
+                <p>Taxes &amp; fees: no additional tax or fee details were returned for this rate.</p>
+                <p>
+                  Cancellation: terms are provided by the supplier and may be finalized during
+                  prebook.
+                </p>
+              </div>
             </div>
             <div className="flex flex-col gap-3 sm:items-end">
               <p className="text-2xl font-black">
