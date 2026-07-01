@@ -124,6 +124,29 @@ export function isRateHawkConfigured(): boolean {
 }
 
 /**
+ * Payota is the ETG card-payment gateway used by the `now` payment type. It is a
+ * separate host from the ETG API but authenticates with the SAME Basic
+ * credentials (KEY_ID:API_KEY). Default is the documented production host; there
+ * is no Payota sandbox (the `now` type is unavailable in ETG Sandbox), so `now`
+ * is exercised against the ETG test key. Override only via env for staging.
+ */
+const PAYOTA_DEFAULT_HOST = "https://api.payota.net";
+
+export function getPayotaBaseUrl(): string {
+  const raw = process.env.RATEHAWK_PAYOTA_BASE_URL?.trim();
+  if (!raw) {
+    return PAYOTA_DEFAULT_HOST;
+  }
+
+  try {
+    const url = new URL(raw);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return PAYOTA_DEFAULT_HOST;
+  }
+}
+
+/**
  * Resolve full credentials for the active env. Throws if not configured.
  * The returned object must stay server-side and must never be logged.
  */

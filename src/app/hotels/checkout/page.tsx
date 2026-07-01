@@ -96,6 +96,11 @@ export default async function StandaloneHotelCheckoutPage({
                 Stripe charges the ETG deposit amount returned by booking/form.
               </p>
             ) : null}
+            {summary.payment.mode === "now" ? (
+              <p className="mt-2 text-xs font-semibold text-brand-navy/55 dark:text-white/55">
+                ETG charges this card amount directly and may require 3-D Secure verification.
+              </p>
+            ) : null}
           </div>
         </aside>
       </section>

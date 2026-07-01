@@ -101,6 +101,13 @@ export type StandaloneHotelCheckoutSummaryDTO = {
   cancellationFreeBefore: string | null;
   payment:
     | { mode: "deposit"; amount: string; currencyCode: string }
+    | {
+        mode: "now";
+        amount: string;
+        currencyCode: string;
+        isNeedCreditCardData: boolean;
+        isNeedCvc: boolean;
+      }
     | { mode: "unsupported"; reason: string; returnedTypes: string[] };
   isGenderSpecificationRequired: boolean;
 };

@@ -16,7 +16,6 @@ import {
   isStandaloneBookingCutoffReached,
   isStandaloneStatusPollEligible,
   nextStandaloneStatusAfterFinishException,
-  nextStandaloneStatusFromStatusClassification,
   type StandaloneHotelBookingStatus,
 } from "@/server/hotels/booking-state";
 import {
@@ -29,7 +28,10 @@ import {
   isRateHawkConfigured,
   resolveRateHawkEnv,
 } from "@/server/providers/ratehawk/config";
-import { rateHawkBookingRequest } from "@/server/providers/ratehawk/client";
+import {
+  payotaCardTokenRequest,
+  rateHawkBookingRequest,
+} from "@/server/providers/ratehawk/client";
 import {
   mapMealToBoardBasis,
   prebookHotelRate,
@@ -39,23 +41,32 @@ import {
   BOOKING_ENDPOINTS,
   BOOKING_FORM_LIFETIME_MS,
   MAX_CREATE_BOOKING_RETRIES,
+  PAYOTA_ENDPOINTS,
   STATUS_POLL_INTERVAL_MS,
   buildBookingStatusRequest,
   buildCreateBookingRequest,
+  buildCreateCreditCardTokenRequest,
+  buildStoredNowSelectedPayment,
   buildStartBookingRequest,
   classifyBookingFinish,
   classifyBookingStatus,
   classifyCreateBooking,
+  classifyCreditCardToken,
   decideStandaloneFinishAfterStripe,
+  decideStandalonePaymentSelection,
   generatePartnerOrderId,
+  generatePaymentUuid,
   isHotelPageBookHash,
   isPrebookBookHash,
   parseCreateBookingResponse,
-  selectDepositPaymentType,
+  parseThreeDsRedirect,
+  type CreditCardData,
   type GuestName,
   type ParsedPaymentType,
   type RoomGuests,
   type SelectedPaymentType,
+  type StandalonePaymentSelection,
+  type ThreeDsRedirect,
 } from "@/server/providers/ratehawk/booking/contracts";
 import {
   validateCheckoutGuestRooms,
@@ -114,7 +125,7 @@ type StandalonePrebookFailureLog = {
 };
 
 const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type StandaloneStatus = StandaloneHotelBookingStatus;
 
@@ -176,7 +187,7 @@ export type StandaloneHotelPrebookResult = {
   checkoutId: string;
   checkoutToken: string;
   checkoutUrl: string;
-  paymentMode: "deposit" | "unsupported";
+  paymentMode: "deposit" | "now" | "unsupported";
   unsupportedReason: string | null;
   priceChanged: boolean;
   oldPrice: { amount: number; currency: string };
@@ -198,6 +209,13 @@ export type StandaloneHotelCheckoutSummary = {
   cancellationFreeBefore: string | null;
   payment:
     | { mode: "deposit"; amount: string; currencyCode: string }
+    | {
+        mode: "now";
+        amount: string;
+        currencyCode: string;
+        isNeedCreditCardData: boolean;
+        isNeedCvc: boolean;
+      }
     | { mode: "unsupported"; reason: string; returnedTypes: string[] };
   isGenderSpecificationRequired: boolean;
 };
@@ -280,6 +298,29 @@ export function getStandaloneHotelBookingDisabledReason(): string | null {
 
   if (!isRateHawkConfigured()) {
     return "RateHawk provider credentials are not configured";
+  }
+
+  return null;
+}
+
+/**
+ * ETG `now` card payment (Payota + 3DS) gate. It inherits every standalone
+ * booking guard (flag on, non-prod, credentials) and additionally requires
+ * RATEHAWK_NOW_PAYMENT_ENABLED === "true". Default OFF: without the explicit
+ * flag the `now` payment type stays unsupported and no card is ever collected.
+ */
+export function isStandaloneNowPaymentEnabled(): boolean {
+  return getStandaloneNowPaymentDisabledReason() === null;
+}
+
+export function getStandaloneNowPaymentDisabledReason(): string | null {
+  const bookingDisabled = getStandaloneHotelBookingDisabledReason();
+  if (bookingDisabled) {
+    return bookingDisabled;
+  }
+
+  if ((process.env.RATEHAWK_NOW_PAYMENT_ENABLED ?? "").trim().toLowerCase() !== "true") {
+    return "RATEHAWK_NOW_PAYMENT_ENABLED is not 'true'";
   }
 
   return null;
@@ -420,7 +461,10 @@ export async function startStandaloneHotelPrebook(input: {
     userIp,
     failureLog: prebookFailureLog,
   });
-  const deposit = selectDepositPaymentType(form.paymentTypes);
+  const selection: StandalonePaymentSelection = decideStandalonePaymentSelection({
+    paymentTypes: form.paymentTypes,
+    nowEnabled: isStandaloneNowPaymentEnabled(),
+  });
   const checkoutToken = randomBytes(32).toString("base64url");
   const expiresAt = new Date(
     Date.now() + Math.min(HOTEL_CHECKOUT_TTL_SECONDS * 1000, BOOKING_FORM_LIFETIME_MS),
@@ -506,7 +550,8 @@ export async function startStandaloneHotelPrebook(input: {
     );
   }
 
-  const status: StandaloneStatus = deposit ? "form_created" : "unsupported_payment";
+  const status: StandaloneStatus =
+    selection.mode === "unsupported" ? "unsupported_payment" : "form_created";
   const insert = await admin
     .from("standalone_hotel_booking_sessions")
     .insert({
@@ -538,7 +583,7 @@ export async function startStandaloneHotelPrebook(input: {
       provider_order_id: form.orderId,
       provider_order_item_id: form.itemId,
       payment_types: form.paymentTypes,
-      selected_payment_type: deposit,
+      selected_payment_type: selection.selected,
       is_gender_specification_required: form.isGenderSpecificationRequired,
       supplier_data_requirements: form.supplierDataRequirements,
       upsell_data: form.upsellData,
@@ -564,10 +609,11 @@ export async function startStandaloneHotelPrebook(input: {
     checkoutId,
     checkoutToken,
     checkoutUrl: `/hotels/checkout?checkout=${encodeURIComponent(checkoutId)}`,
-    paymentMode: deposit ? "deposit" : "unsupported",
-    unsupportedReason: deposit
-      ? null
-      : unsupportedPaymentReason(form.paymentTypes.map((p) => p.type)),
+    paymentMode: selection.mode,
+    unsupportedReason:
+      selection.mode === "unsupported"
+        ? unsupportedPaymentReason(form.paymentTypes.map((p) => p.type))
+        : null,
     priceChanged,
     oldPrice: { amount: priceAtHotelpage, currency: hotelpageCurrency },
     newPrice: { amount: priceAtPrebook, currency },
@@ -606,11 +652,19 @@ export async function getStandaloneHotelCheckoutSummary(
     payment:
       selected?.type === "deposit"
         ? { mode: "deposit", amount: selected.amount, currencyCode: selected.currencyCode }
-        : {
-            mode: "unsupported",
-            reason: unsupportedPaymentReason(row.payment_types.map((p) => p.type)),
-            returnedTypes: row.payment_types.map((p) => p.type),
-          },
+        : selected?.type === "now"
+          ? {
+              mode: "now",
+              amount: selected.amount,
+              currencyCode: selected.currencyCode,
+              isNeedCreditCardData: selected.isNeedCreditCardData ?? true,
+              isNeedCvc: selected.isNeedCvc ?? false,
+            }
+          : {
+              mode: "unsupported",
+              reason: unsupportedPaymentReason(row.payment_types.map((p) => p.type)),
+              returnedTypes: row.payment_types.map((p) => p.type),
+            },
     isGenderSpecificationRequired: row.is_gender_specification_required,
   };
 }
@@ -758,6 +812,7 @@ export async function createStandaloneHotelStripeSession(input: {
       phone,
       comment,
       guestRooms: validated.rooms,
+      paymentType: "deposit",
     }));
 
     if (!claimed.booking_id) {
@@ -988,6 +1043,387 @@ export async function getStandaloneHotelPublicStatus(input: {
     allowExpired: true,
   });
   return toPublicStatus(latest ?? current);
+}
+
+/**
+ * ETG `now` payment - step 1: Create credit card token (Payota).
+ *
+ * Collects contact + guest names + raw card data, validates everything
+ * server-side, tokenizes the card at Payota with a fresh init_uuid/pay_uuid, and
+ * stores ONLY the resulting uuids + card-data-free payment metadata. Raw card
+ * data (PAN/CVC/expiry) is never persisted and never logged.
+ */
+export async function tokenizeStandaloneHotelNowCard(input: {
+  checkoutId: string;
+  checkoutToken: string | undefined;
+  contact: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    comment?: string | null;
+  };
+  guestRooms: unknown;
+  card: CreditCardData;
+  signal?: AbortSignal;
+}): Promise<{ ok: true }> {
+  const disabled = getStandaloneNowPaymentDisabledReason();
+  if (disabled) {
+    throw new StandaloneHotelBookingError(
+      503,
+      `Card payment is not enabled: ${disabled}.`,
+      "etg_now_disabled",
+    );
+  }
+
+  const row = await loadStandaloneSession(input.checkoutId, input.checkoutToken);
+  if (!row) {
+    throw new StandaloneHotelBookingError(
+      404,
+      "This hotel checkout has expired.",
+      "checkout_session_not_found",
+    );
+  }
+
+  const selected = row.selected_payment_type;
+  if (!selected || selected.type !== "now") {
+    throw new StandaloneHotelBookingError(
+      409,
+      "Card payment is not available for this rate.",
+      "now_payment_not_available",
+    );
+  }
+  if (row.status !== "form_created") {
+    throw new StandaloneHotelBookingError(
+      409,
+      "This checkout is already in progress.",
+      "checkout_session_expired",
+    );
+  }
+  if (!row.provider_order_item_id) {
+    throw new StandaloneHotelBookingError(
+      409,
+      "We could not start card payment for this rate.",
+      "card_tokenization_failed",
+    );
+  }
+
+  const expectedRooms = buildCheckoutGuestRooms(row.guests);
+  const validated = validateCheckoutGuestRooms(input.guestRooms, expectedRooms);
+  if (!validated.ok || !validated.rooms) {
+    throw new StandaloneHotelBookingError(400, "Please review guest details and try again.");
+  }
+  if (
+    row.is_gender_specification_required &&
+    validated.rooms.some((room) => room.guests.some((guest) => guest.gender === "unknown"))
+  ) {
+    throw new StandaloneHotelBookingError(400, "Guest gender is required for this hotel rate.");
+  }
+
+  const email = requireEmail(input.contact.email);
+  const firstName = cleanRequiredText(input.contact.firstName, "firstName");
+  const lastName = cleanRequiredText(input.contact.lastName, "lastName");
+  const phone = cleanRequiredText(input.contact.phone, "phone");
+  const comment = cleanOptionalText(input.contact.comment, 2000);
+
+  const initUuid = generatePaymentUuid();
+  const payUuid = generatePaymentUuid();
+
+  // PCI-SENSITIVE: raw card data exists ONLY inside `tokenBody` and is handed
+  // straight to the Payota transport over TLS. It is never written to the DB and
+  // never logged. `buildCreateCreditCardTokenRequest` validates format only.
+  let tokenBody: Record<string, unknown>;
+  try {
+    tokenBody = buildCreateCreditCardTokenRequest({
+      objectId: row.provider_order_item_id,
+      payUuid,
+      initUuid,
+      userFirstName: firstName,
+      userLastName: lastName,
+      isCvcRequired: selected.isNeedCvc === true,
+      card: input.card,
+    });
+  } catch {
+    throw new StandaloneHotelBookingError(
+      400,
+      "Please review the card details and try again.",
+      "card_tokenization_failed",
+    );
+  }
+
+  const envelope = await payotaCardTokenRequest(
+    PAYOTA_ENDPOINTS.createCreditCardToken,
+    tokenBody,
+    { signal: input.signal },
+  );
+  const classification = classifyCreditCardToken(envelope);
+  if (classification.kind !== "success") {
+    logStandaloneNowFailure("card_tokenization_failed", row.id, envelope);
+    throw new StandaloneHotelBookingError(
+      402,
+      "We could not verify your card. Please check the details and try again.",
+      "card_tokenization_failed",
+    );
+  }
+
+  const contactRecord = { firstName, lastName, email, phone, ...(comment ? { comment } : {}) };
+  const storedSelected = buildStoredNowSelectedPayment(selected, { initUuid, payUuid });
+  const update = await getSupabaseAdminClient()
+    .from("standalone_hotel_booking_sessions")
+    .update({
+      contact: contactRecord,
+      guest_rooms: validated.rooms,
+      selected_payment_type: storedSelected,
+    })
+    .eq("id", row.id)
+    .eq("status", "form_created")
+    .select("id");
+  if (update.error) throw update.error;
+  if (!Array.isArray(update.data) || update.data.length !== 1) {
+    throw new StandaloneHotelBookingError(
+      409,
+      "This checkout is already in progress.",
+      "checkout_session_expired",
+    );
+  }
+
+  return { ok: true };
+}
+
+/**
+ * ETG `now` payment - step 2: Start Booking + first status check.
+ *
+ * Atomically claims the tokenized session (form_created -> finish_started),
+ * records the booking row, calls Start Booking with the `now` payment (init/pay
+ * uuid + return_path), then checks status once. If the issuer requires 3-D
+ * Secure the ETG data_3ds redirect is returned for the browser to submit; after
+ * the shopper returns to return_path the status poller resolves the final state.
+ * Success is ONLY the finish/status `ok`/`completed` result - never this call
+ * alone.
+ */
+export async function finishStandaloneHotelNowBooking(input: {
+  checkoutId: string;
+  checkoutToken: string | undefined;
+  signal?: AbortSignal;
+}): Promise<{
+  status: "processing" | "confirmed" | "failed" | "3ds";
+  threeDs: ThreeDsRedirect | null;
+  successUrl: string;
+}> {
+  const disabled = getStandaloneNowPaymentDisabledReason();
+  if (disabled) {
+    throw new StandaloneHotelBookingError(
+      503,
+      `Card payment is not enabled: ${disabled}.`,
+      "etg_now_disabled",
+    );
+  }
+
+  const row = await loadStandaloneSession(input.checkoutId, input.checkoutToken);
+  if (!row) {
+    throw new StandaloneHotelBookingError(
+      404,
+      "This hotel checkout has expired.",
+      "checkout_session_not_found",
+    );
+  }
+
+  const successUrl = standaloneNowSuccessUrl(row.id);
+  const selected = row.selected_payment_type;
+  if (!selected || selected.type !== "now") {
+    throw new StandaloneHotelBookingError(
+      409,
+      "Card payment is not available for this rate.",
+      "now_payment_not_available",
+    );
+  }
+  // A `now` rate needs a card token unless ETG explicitly says otherwise.
+  const requiresCardToken = selected.isNeedCreditCardData !== false;
+  if (requiresCardToken && (!selected.initUuid || !selected.payUuid)) {
+    throw new StandaloneHotelBookingError(
+      409,
+      "Please enter your card details before confirming.",
+      "card_tokenization_failed",
+    );
+  }
+  if (!row.contact) {
+    throw new StandaloneHotelBookingError(
+      409,
+      "Contact details are missing. Please restart checkout.",
+      "checkout_session_not_found",
+    );
+  }
+  if (!row.guest_rooms || row.guest_rooms.length === 0) {
+    throw new StandaloneHotelBookingError(
+      409,
+      "Guest details are missing. Please restart checkout.",
+      "checkout_session_not_found",
+    );
+  }
+
+  // Idempotency: only a fresh, tokenized session may start the finish call.
+  if (row.status !== "form_created") {
+    return { status: mapNowStatus(row.status), threeDs: null, successUrl };
+  }
+
+  const nowIso = new Date().toISOString();
+  const returnPath = successUrl;
+  const storedSelected = buildStoredNowSelectedPayment(selected, {
+    initUuid: selected.initUuid,
+    payUuid: selected.payUuid,
+    returnPath,
+  });
+
+  const claim = await getSupabaseAdminClient()
+    .from("standalone_hotel_booking_sessions")
+    .update({
+      status: "finish_started",
+      finish_started_at: nowIso,
+      selected_payment_type: storedSelected,
+      booking_cutoff_at: getStandaloneBookingCutoffAt({
+        bookingCutoffAt: null,
+        finishStartedAt: nowIso,
+        confirmationWindowMs: getStandaloneBookingConfirmationWindowMs(),
+      }),
+    })
+    .eq("id", row.id)
+    .eq("status", "form_created")
+    .select("*");
+  if (claim.error) throw claim.error;
+  const claimedRows = Array.isArray(claim.data) ? claim.data : [];
+  if (claimedRows.length !== 1) {
+    const current = await loadStandaloneSessionById(row.id);
+    return { status: mapNowStatus(current?.status ?? "processing"), threeDs: null, successUrl };
+  }
+  let claimed = normalizeStandaloneRow(claimedRows[0] as Record<string, unknown>);
+
+  // Record the booking row. ETG charges the card directly for `now`, so there is
+  // no Stripe payment intent; the booking is tracked via provider_order_status.
+  if (!claimed.booking_id) {
+    const contact = claimed.contact ?? {};
+    const bookingId = await createStandaloneBookingRow({
+      row: claimed,
+      firstName: String(contact.firstName ?? ""),
+      lastName: String(contact.lastName ?? ""),
+      email: String(contact.email ?? ""),
+      phone: readText(contact.phone) ?? "",
+      comment: readText(contact.comment),
+      guestRooms: claimed.guest_rooms ?? [],
+      paymentType: "now",
+    });
+    const attach = await getSupabaseAdminClient()
+      .from("standalone_hotel_booking_sessions")
+      .update({ booking_id: bookingId })
+      .eq("id", claimed.id)
+      .is("booking_id", null)
+      .select("*")
+      .maybeSingle();
+    if (attach.error) throw attach.error;
+    if (attach.data) {
+      claimed = normalizeStandaloneRow(attach.data as Record<string, unknown>);
+    }
+    await getSupabaseAdminClient()
+      .from("bookings")
+      .update({ provider_order_status: "starting", provider_last_status_at: nowIso })
+      .eq("id", bookingId);
+  }
+
+  const finishBody = buildStandaloneFinishRequestBody(claimed, {
+    type: "now",
+    amount: selected.amount,
+    currencyCode: selected.currencyCode,
+    initUuid: selected.initUuid,
+    payUuid: selected.payUuid,
+    returnPath,
+  });
+
+  let finishSignal: Awaited<ReturnType<typeof rateHawkBookingRequest>>;
+  try {
+    finishSignal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.bookingFinish, finishBody, {
+      signal: input.signal,
+    });
+  } catch {
+    await updateStandaloneAndBooking(claimed, {
+      session: {
+        status: nextStandaloneStatusAfterFinishException(),
+        provider_result_code: "booking_finish_exception",
+      },
+      booking: {
+        provider_order_status: "processing",
+        provider_result_code: "booking_finish_exception",
+        provider_last_status_at: new Date().toISOString(),
+      },
+    });
+    return { status: "processing", threeDs: null, successUrl };
+  }
+
+  const finishClass = classifyBookingFinish(finishSignal);
+  if (finishClass.kind === "failed") {
+    await markStandaloneFailed(claimed, finishClass.code ?? "booking_finish_failed");
+    return { status: "failed", threeDs: null, successUrl };
+  }
+  if (finishClass.kind !== "proceed") {
+    await markStandaloneReview(claimed, "booking_finish_unknown");
+    return { status: "failed", threeDs: null, successUrl };
+  }
+
+  // Proceed -> one immediate status check to surface 3DS or an instant result.
+  let statusSignal: Awaited<ReturnType<typeof rateHawkBookingRequest>>;
+  try {
+    statusSignal = await rateHawkBookingRequest(
+      BOOKING_ENDPOINTS.bookingFinishStatus,
+      buildBookingStatusRequest(claimed.partner_order_id),
+      { signal: input.signal },
+    );
+  } catch {
+    await updateStandaloneAndBooking(claimed, {
+      session: { status: "processing", provider_result_code: "booking_status_exception" },
+      booking: {
+        provider_order_status: "processing",
+        provider_last_status_at: new Date().toISOString(),
+      },
+    });
+    return { status: "processing", threeDs: null, successUrl };
+  }
+
+  const outcome = await applyStandaloneFinishStatus(claimed, statusSignal);
+  if (outcome.threeDs) {
+    return { status: "3ds", threeDs: outcome.threeDs, successUrl };
+  }
+  return { status: mapNowStatus(outcome.status), threeDs: null, successUrl };
+}
+
+function standaloneNowSuccessUrl(checkoutId: string): string {
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  return `${siteUrl}/hotels/checkout/success?checkout_id=${encodeURIComponent(checkoutId)}`;
+}
+
+function mapNowStatus(status: StandaloneStatus): "processing" | "confirmed" | "failed" | "3ds" {
+  if (status === "confirmed") return "confirmed";
+  if (
+    status === "failed" ||
+    status === "pending_review" ||
+    status === "unsupported_payment" ||
+    status === "expired"
+  ) {
+    return "failed";
+  }
+  return "processing";
+}
+
+function logStandaloneNowFailure(
+  code: string,
+  checkoutId: string,
+  envelope: { httpStatus: number; status: string | null; error: string | null },
+): void {
+  // Never logs card data or the provider response body - only sanitized codes.
+  console.error("[standalone.hotel.now.failure]", {
+    code,
+    checkoutId: safeLogText(checkoutId, 80),
+    providerStatus: safeLogText(envelope.status, 40),
+    providerCode: sanitizeProviderCode(envelope.error),
+    httpStatus: envelope.httpStatus,
+  });
 }
 
 export function getHotelSearchCookieName() {
@@ -1288,12 +1724,15 @@ async function createStandaloneBookingRow(input: {
   phone: string;
   comment: string | null;
   guestRooms: ValidatedCheckoutGuestRoom[];
+  paymentType: "deposit" | "now";
 }): Promise<string> {
   const travelersCount = input.row.guests.reduce(
     (sum, room) => sum + room.adults + room.children.length,
     0,
   );
   const selected = input.row.selected_payment_type;
+  const chargeType =
+    input.paymentType === "now" ? "standalone_hotel_now" : "standalone_hotel_deposit";
   const admin = getSupabaseAdminClient();
   const insert = await admin
     .from("bookings")
@@ -1311,12 +1750,12 @@ async function createStandaloneBookingRow(input: {
       provider_partner_order_id: input.row.partner_order_id,
       provider_order_id: input.row.provider_order_id,
       provider_order_item_id: input.row.provider_order_item_id,
-      provider_payment_type: "deposit",
+      provider_payment_type: input.paymentType,
       provider_payment_types: input.row.payment_types,
       provider_is_gender_specification_required: input.row.is_gender_specification_required,
       metadata: {
         source: "standalone_hotel",
-        charge_type: "standalone_hotel_deposit",
+        charge_type: chargeType,
         standalone_checkout_id: input.row.id,
         hotel_id: input.row.hotel_id,
         hotel_name: input.row.hotel_name,
@@ -1339,6 +1778,41 @@ async function createStandaloneBookingRow(input: {
   return (insert.data as { id: string }).id;
 }
 
+/**
+ * Assemble the Start Booking (finish) body from a session's stored contact +
+ * guest rooms + the selected payment entry. Shared by the deposit (Stripe) and
+ * `now` (card/3DS) paths. Caller must ensure contact + guest_rooms are present.
+ */
+function buildStandaloneFinishRequestBody(
+  row: StandaloneSessionRow,
+  payment: SelectedPaymentType,
+): Record<string, unknown> {
+  const contact = row.contact ?? {};
+  const rooms = toBookingRooms(row.guest_rooms ?? [], row.is_gender_specification_required);
+  const supplierData =
+    row.supplier_data_requirements && Object.keys(row.supplier_data_requirements).length > 0
+      ? {
+          firstNameOriginal: readText(contact.firstName) ?? undefined,
+          lastNameOriginal: readText(contact.lastName) ?? undefined,
+          phone: readText(contact.phone) ?? undefined,
+          email: readText(contact.email) ?? undefined,
+        }
+      : undefined;
+
+  return buildStartBookingRequest({
+    partner: { partnerOrderId: row.partner_order_id },
+    language: row.language,
+    user: {
+      email: String(contact.email),
+      ...(readText(contact.phone) ? { phone: readText(contact.phone)! } : {}),
+      ...(readText(contact.comment) ? { comment: readText(contact.comment)! } : {}),
+    },
+    rooms,
+    payment,
+    supplierData,
+  });
+}
+
 async function startStandaloneBookingFinish(row: StandaloneSessionRow): Promise<void> {
   const selected = row.selected_payment_type;
   if (!selected || selected.type !== "deposit") {
@@ -1354,30 +1828,7 @@ async function startStandaloneBookingFinish(row: StandaloneSessionRow): Promise<
     return;
   }
 
-  const contact = row.contact;
-  const rooms = toBookingRooms(row.guest_rooms, row.is_gender_specification_required);
-  const supplierData =
-    row.supplier_data_requirements && Object.keys(row.supplier_data_requirements).length > 0
-      ? {
-          firstNameOriginal: readText(contact.firstName) ?? undefined,
-          lastNameOriginal: readText(contact.lastName) ?? undefined,
-          phone: readText(contact.phone) ?? undefined,
-          email: readText(contact.email) ?? undefined,
-        }
-      : undefined;
-
-  const body = buildStartBookingRequest({
-    partner: { partnerOrderId: row.partner_order_id },
-    language: row.language,
-    user: {
-      email: String(contact.email),
-      ...(readText(contact.phone) ? { phone: readText(contact.phone)! } : {}),
-      ...(readText(contact.comment) ? { comment: readText(contact.comment)! } : {}),
-    },
-    rooms,
-    payment: selected,
-    supplierData,
-  });
+  const body = buildStandaloneFinishRequestBody(row, selected);
 
   const signal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.bookingFinish, body);
   const classification = classifyBookingFinish(signal);
@@ -1424,50 +1875,83 @@ async function maybePollStandaloneStatus(row: StandaloneSessionRow): Promise<voi
 
   const body = buildBookingStatusRequest(row.partner_order_id);
   const signal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.bookingFinishStatus, body);
+  await applyStandaloneFinishStatus(row, signal);
+}
+
+type StandaloneFinishStatusOutcome = {
+  status: StandaloneStatus;
+  /** ETG 3DS redirect, only when a `now` order returns status "3ds". */
+  threeDs: ThreeDsRedirect | null;
+};
+
+/**
+ * Apply one Check-booking-process (finish/status) result to a session + its
+ * booking. Shared by the background poller and the `now` finish call.
+ *
+ * The `3ds` status is a NORMAL interactive step for `now` (the shopper must
+ * complete 3-D Secure), so it keeps the order poll-eligible instead of routing
+ * it to manual review. For `deposit` a `3ds` status is unexpected and is sent to
+ * review, preserving the previous behaviour.
+ */
+async function applyStandaloneFinishStatus(
+  row: StandaloneSessionRow,
+  signal: { httpStatus: number; status: string | null; error: string | null; data: unknown },
+): Promise<StandaloneFinishStatusOutcome> {
   const classification = classifyBookingStatus(signal);
-  const nextStatus = nextStandaloneStatusFromStatusClassification(classification);
+  const isNow = row.selected_payment_type?.type === "now";
+  const nowIso = new Date().toISOString();
   const basePatch = {
-    finish_status_last_checked_at: new Date().toISOString(),
+    finish_status_last_checked_at: nowIso,
     finish_status_poll_count: row.finish_status_poll_count + 1,
     provider_result_code: signal.error ?? signal.status,
   };
 
-  if (nextStatus === "confirmed") {
+  if (classification.kind === "success") {
     await updateStandaloneAndBooking(row, {
-      session: {
-        ...basePatch,
-        status: "confirmed",
-        confirmed_at: new Date().toISOString(),
-      },
+      session: { ...basePatch, status: "confirmed", confirmed_at: nowIso },
       booking: {
+        payment_status: "paid",
         provider_order_status: "confirmed",
-        provider_confirmed_at: new Date().toISOString(),
-        provider_last_status_at: new Date().toISOString(),
+        provider_confirmed_at: nowIso,
+        provider_last_status_at: nowIso,
       },
     });
-    return;
+    return { status: "confirmed", threeDs: null };
   }
 
-  if (nextStatus === "processing") {
+  if (classification.kind === "requires_3ds") {
+    if (isNow) {
+      await updateStandaloneAndBooking(row, {
+        session: { ...basePatch, status: "processing" },
+        booking: {
+          provider_order_status: "processing",
+          provider_last_status_at: nowIso,
+        },
+      });
+      return { status: "processing", threeDs: parseThreeDsRedirect(signal.data) };
+    }
+    await markStandaloneReview(row, "unexpected_3ds_for_deposit");
+    return { status: "pending_review", threeDs: null };
+  }
+
+  if (classification.kind === "poll" || classification.kind === "unknown") {
     await updateStandaloneAndBooking(row, {
       session: { ...basePatch, status: "processing" },
       booking: {
         provider_order_status: "processing",
-        provider_last_status_at: new Date().toISOString(),
+        provider_last_status_at: nowIso,
       },
     });
-    return;
-  }
-
-  if (nextStatus === "pending_review") {
-    await markStandaloneReview(row, "unexpected_3ds_for_deposit");
-    return;
+    return { status: "processing", threeDs: null };
   }
 
   await markStandaloneFailed(
     row,
-    classification.kind === "failed" ? (classification.code ?? "booking_status_failed") : "booking_status_failed",
+    classification.kind === "failed"
+      ? (classification.code ?? "booking_status_failed")
+      : "booking_status_failed",
   );
+  return { status: "failed", threeDs: null };
 }
 
 async function mirrorBookingTerminalState(row: StandaloneSessionRow): Promise<void> {
@@ -1764,7 +2248,7 @@ function toPublicStatus(row: StandaloneSessionRow): StandaloneHotelPublicStatus 
 
 function unsupportedPaymentReason(types: string[]): string {
   const returned = types.length ? types.join(", ") : "none";
-  return `Card payment is unavailable because ETG booking/form did not return a deposit payment option. Returned payment type(s): ${returned}.`;
+  return `Online card payment is not available for this hotel rate. Returned payment type(s): ${returned}.`;
 }
 
 function buildCancellationSummary(freeBefore: string | null, policiesCount: number): string | null {

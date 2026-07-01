@@ -476,6 +476,14 @@ export type SelectedPaymentType = {
   initUuid?: string;
   payUuid?: string;
   returnPath?: string;
+  /**
+   * Sanitized card-requirement flags carried over from the create-booking
+   * payment_types entry. Drive the `now` card-token UI/validation. These are
+   * NEVER sent back to ETG on Start Booking (buildStartBookingRequest ignores
+   * them); they only describe what the checkout form must collect.
+   */
+  isNeedCreditCardData?: boolean;
+  isNeedCvc?: boolean;
 };
 
 /** `supplier_data` block. Only real, collected values are sent; never invented. */
@@ -861,4 +869,282 @@ export function buildOrderInfoRequest(
     search: { partner_order_ids: [partnerOrderId] },
     language: "en",
   };
+}
+
+// ---- ETG `now` card payment (Payota) - pure builders ----------------------
+//
+// The `now` payment type means ETG charges the end-user card. It requires the
+// "Create credit card token" call to the Payota gateway BEFORE Start Booking,
+// then Start Booking is sent with the same init_uuid/pay_uuid + return_path.
+//
+// Contract source: official ETG docs (verified 2026-07-01):
+//   - Create credit card token: POST https://api.payota.net/api/public/v1/manage/init_partners
+//       body: object_id (= booking item_id), pay_uuid (UUID4), init_uuid (UUID4),
+//       user_first_name, user_last_name, is_cvc_required, cvc (when required),
+//       credit_card_data_core { card_number, card_holder, month, year }.
+//       Auth: HTTP Basic KEY_ID:API_KEY (same credentials as the ETG API).
+//   - Start Booking (now): return_path (required), pay_uuid + init_uuid when the
+//       payment_types entry has is_need_credit_card_data = true.
+//   - Finish Status (3ds): status "3ds" with data.data_3ds { action_url, method,
+//       data:{ MD, PaReq, TermUrl } }; after 3DS the gateway redirects to
+//       return_path and the integrator re-polls Finish Status until `ok`.
+//
+// PCI NOTE: raw card fields (card_number, cvc, expiry, holder) exist ONLY inside
+// the object returned by buildCreateCreditCardTokenRequest, which is handed
+// straight to the Payota transport. They are never persisted or logged. The
+// stored SelectedPaymentType (buildStoredNowSelectedPayment) is card-data-free.
+
+/** Payota (ETG card gateway) endpoint paths. Host is separate from the ETG API. */
+export const PAYOTA_ENDPOINTS = {
+  /** Create credit card token. Side-effecting, NOT idempotent. */
+  createCreditCardToken: "/api/public/v1/manage/init_partners",
+} as const;
+
+const UUID4_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID4_RE.test(value);
+}
+
+/** Fresh UUID4 for a Payota payment (init_uuid / pay_uuid). Unique per attempt. */
+export function generatePaymentUuid(): string {
+  return randomUUID();
+}
+
+/**
+ * Select the `now` payment_types entry to use for a standalone booking.
+ * Prefers a USD-denominated entry (used for the ETG certification test), then
+ * falls back to the first `now` entry. Returns a card-data-free selection with
+ * the is_need_* flags preserved so the checkout form knows what to collect.
+ */
+export function selectNowPaymentType(
+  paymentTypes: ParsedPaymentType[],
+): SelectedPaymentType | null {
+  const nowTypes = paymentTypes.filter((p) => p.type === "now");
+  if (nowTypes.length === 0) return null;
+
+  const usd = nowTypes.find((p) => p.currencyCode.toUpperCase() === "USD");
+  const chosen = usd ?? nowTypes[0];
+  return {
+    type: chosen.type,
+    amount: chosen.amount,
+    currencyCode: chosen.currencyCode,
+    isNeedCreditCardData: chosen.isNeedCreditCardData,
+    isNeedCvc: chosen.isNeedCvc,
+  };
+}
+
+export type StandalonePaymentSelection =
+  | { mode: "deposit"; selected: SelectedPaymentType }
+  | { mode: "now"; selected: SelectedPaymentType }
+  | { mode: "unsupported"; selected: null };
+
+/**
+ * Decide the standalone checkout payment path from the create-booking
+ * payment_types. `deposit` (B2B, Stripe) keeps priority for backwards
+ * compatibility; `now` is used only when the feature flag is enabled. Anything
+ * else stays unsupported.
+ */
+export function decideStandalonePaymentSelection(input: {
+  paymentTypes: ParsedPaymentType[];
+  nowEnabled: boolean;
+}): StandalonePaymentSelection {
+  const deposit = selectDepositPaymentType(input.paymentTypes);
+  if (deposit) {
+    return { mode: "deposit", selected: deposit };
+  }
+
+  if (input.nowEnabled) {
+    const now = selectNowPaymentType(input.paymentTypes);
+    if (now) {
+      return { mode: "now", selected: now };
+    }
+  }
+
+  return { mode: "unsupported", selected: null };
+}
+
+/**
+ * Build the card-data-free SelectedPaymentType to persist for a `now` rate.
+ * Whitelists exactly the safe fields, so no card number / cvc / expiry can ever
+ * be written to the database even if the input object is polluted.
+ */
+export function buildStoredNowSelectedPayment(
+  selected: SelectedPaymentType,
+  tokens?: { initUuid?: string; payUuid?: string; returnPath?: string },
+): SelectedPaymentType {
+  const stored: SelectedPaymentType = {
+    type: selected.type,
+    amount: selected.amount,
+    currencyCode: selected.currencyCode,
+  };
+  if (typeof selected.isNeedCreditCardData === "boolean") {
+    stored.isNeedCreditCardData = selected.isNeedCreditCardData;
+  }
+  if (typeof selected.isNeedCvc === "boolean") {
+    stored.isNeedCvc = selected.isNeedCvc;
+  }
+  if (tokens?.initUuid) stored.initUuid = tokens.initUuid;
+  if (tokens?.payUuid) stored.payUuid = tokens.payUuid;
+  if (tokens?.returnPath) stored.returnPath = tokens.returnPath;
+  return stored;
+}
+
+/**
+ * Raw card fields collected at checkout. Exists ONLY transiently: it is validated
+ * and folded into the Payota request body, then discarded. Never persisted,
+ * never logged, never returned to the browser.
+ */
+export type CreditCardData = {
+  cardNumber: string;
+  cardHolder: string;
+  expiryMonth: string;
+  expiryYear: string;
+  cvc?: string;
+};
+
+export type CreateCreditCardTokenInput = {
+  /** Booking item id from Create Booking (`item_id`). Sent as `object_id`. */
+  objectId: string;
+  payUuid: string;
+  initUuid: string;
+  userFirstName: string;
+  userLastName: string;
+  isCvcRequired: boolean;
+  card: CreditCardData;
+};
+
+const MONTH_RE = /^(0[1-9]|1[0-2])$/;
+const YEAR_RE = /^(\d{2}|\d{4})$/;
+const CVC_RE = /^\d{3,4}$/;
+
+function normalizeDigits(value: string): string {
+  return value.replace(/[\s-]/g, "");
+}
+
+/**
+ * Build the Payota "Create credit card token" request body. Pure assembler:
+ * validates shape/format only, performs NO IO, and NEVER logs. The returned
+ * object is the only place raw card data lives; the caller hands it straight to
+ * the Payota transport and never stores it.
+ */
+export function buildCreateCreditCardTokenRequest(
+  input: CreateCreditCardTokenInput,
+): Record<string, unknown> {
+  assertNonEmpty("objectId", input.objectId);
+  if (!isUuid(input.payUuid)) {
+    throw new BookingContractError("payUuid must be a UUID4");
+  }
+  if (!isUuid(input.initUuid)) {
+    throw new BookingContractError("initUuid must be a UUID4");
+  }
+
+  const firstName = assertNonEmpty("userFirstName", input.userFirstName).trim();
+  const lastName = assertNonEmpty("userLastName", input.userLastName).trim();
+  if (firstName.length > 120 || lastName.length > 120) {
+    throw new BookingContractError("cardholder name is too long");
+  }
+
+  const card = input.card ?? ({} as CreditCardData);
+  const cardNumber = normalizeDigits(assertNonEmpty("card.cardNumber", card.cardNumber));
+  if (!/^\d{12,19}$/.test(cardNumber)) {
+    throw new BookingContractError("card number must be 12-19 digits");
+  }
+  const cardHolder = assertNonEmpty("card.cardHolder", card.cardHolder).trim();
+  if (cardHolder.length > 120) {
+    throw new BookingContractError("card holder is too long");
+  }
+  const month = assertNonEmpty("card.expiryMonth", card.expiryMonth).trim();
+  if (!MONTH_RE.test(month)) {
+    throw new BookingContractError("expiry month must be 01-12");
+  }
+  const year = assertNonEmpty("card.expiryYear", card.expiryYear).trim();
+  if (!YEAR_RE.test(year)) {
+    throw new BookingContractError("expiry year must be 2 or 4 digits");
+  }
+
+  const body: Record<string, unknown> = {
+    object_id: input.objectId,
+    pay_uuid: input.payUuid,
+    init_uuid: input.initUuid,
+    user_first_name: firstName,
+    user_last_name: lastName,
+    is_cvc_required: input.isCvcRequired === true,
+    credit_card_data_core: {
+      year,
+      month,
+      card_number: cardNumber,
+      card_holder: cardHolder,
+    },
+  };
+
+  if (input.isCvcRequired) {
+    const cvc = normalizeDigits(assertNonEmpty("card.cvc", card.cvc ?? ""));
+    if (!CVC_RE.test(cvc)) {
+      throw new BookingContractError("cvc must be 3-4 digits");
+    }
+    body.cvc = cvc;
+  }
+
+  return body;
+}
+
+/** Classify the Payota "Create credit card token" response. */
+export function classifyCreditCardToken(
+  signal: ProviderResponseSignal,
+): BookingClassification {
+  if (isOkStatus(signal)) {
+    return { kind: "success" };
+  }
+
+  const error = norm(signal.error);
+  if (error) {
+    return { kind: "failed", code: error };
+  }
+
+  if (typeof signal.httpStatus === "number" && signal.httpStatus >= 400) {
+    return { kind: "failed", code: "http_error" };
+  }
+
+  return { kind: "unknown" };
+}
+
+/**
+ * Parse the data.data_3ds block from a Finish Status "3ds" response into a
+ * browser-safe redirect instruction. Returns null when the block is absent or
+ * malformed (caller then keeps polling). Contains NO card data - only the ETG
+ * 3DS ACS redirect (action_url + opaque MD/PaReq/TermUrl fields).
+ */
+export type ThreeDsRedirect = {
+  actionUrl: string;
+  method: "get" | "post";
+  fields: Record<string, string>;
+};
+
+export function parseThreeDsRedirect(data: unknown): ThreeDsRedirect | null {
+  if (!data || typeof data !== "object") return null;
+  const root = data as Record<string, unknown>;
+  const block = root.data_3ds;
+  if (!block || typeof block !== "object") return null;
+
+  const rec = block as Record<string, unknown>;
+  const actionUrl = typeof rec.action_url === "string" ? rec.action_url.trim() : "";
+  if (!/^https:\/\//i.test(actionUrl)) return null;
+
+  const method = norm(typeof rec.method === "string" ? rec.method : "post") === "get" ? "get" : "post";
+
+  const fields: Record<string, string> = {};
+  const inner = rec.data;
+  if (inner && typeof inner === "object") {
+    for (const [key, value] of Object.entries(inner as Record<string, unknown>)) {
+      if (typeof value === "string") {
+        fields[key] = value;
+      } else if (typeof value === "number" || typeof value === "boolean") {
+        fields[key] = String(value);
+      }
+    }
+  }
+
+  return { actionUrl, method, fields };
 }

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getRateHawkConfig, type RateHawkConfig } from "./config";
+import { getPayotaBaseUrl, getRateHawkConfig, type RateHawkConfig } from "./config";
 
 /**
  * Server-only HTTP client for the RateHawk / ETG API v3.
@@ -492,13 +492,21 @@ export type RawBookingEnvelope = {
   rateLimit: RateLimitSnapshot;
 };
 
-export async function rateHawkBookingRequest(
-  path: string,
-  body: Record<string, unknown>,
-  options?: { timeoutMs?: number; signal?: AbortSignal },
-): Promise<RawBookingEnvelope> {
-  const config = getRateHawkConfig();
-  const host = config.baseUrl;
+async function rawEnvelopeRequest(input: {
+  /** Credentials for Basic auth. Never logged. */
+  authConfig: RateHawkConfig;
+  /** Origin to send to (ETG API host, or the Payota card host). */
+  baseUrl: string;
+  path: string;
+  body: Record<string, unknown>;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}): Promise<RawBookingEnvelope> {
+  const config = input.authConfig;
+  const host = input.baseUrl;
+  const path = input.path;
+  const body = input.body;
+  const options = { timeoutMs: input.timeoutMs, signal: input.signal };
 
   if (!breakerAllows(host)) {
     // Breaker already open: reject fast WITHOUT recording another failure (that
@@ -527,7 +535,7 @@ export async function rateHawkBookingRequest(
     let response: Response;
 
     try {
-      response = await fetch(`${config.baseUrl}${path}`, {
+      response = await fetch(`${host}${path}`, {
         method: "POST",
         headers: {
           Authorization: buildAuthHeader(config),
@@ -623,6 +631,52 @@ export async function rateHawkBookingRequest(
     parentSignal?.removeEventListener("abort", onParentAbort);
     releaseSlot();
   }
+}
+
+/**
+ * Raw ETG booking request (booking/form, finish, finish/status, cancel, info).
+ * Preserves the full envelope without throwing on application-level statuses.
+ * Must only be used for non-idempotent booking endpoints (no automatic retry).
+ */
+export async function rateHawkBookingRequest(
+  path: string,
+  body: Record<string, unknown>,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<RawBookingEnvelope> {
+  const config = getRateHawkConfig();
+  return rawEnvelopeRequest({
+    authConfig: config,
+    baseUrl: config.baseUrl,
+    path,
+    body,
+    timeoutMs: options?.timeoutMs,
+    signal: options?.signal,
+  });
+}
+
+/**
+ * Payota "Create credit card token" request for the ETG `now` payment type.
+ * Same Basic credentials as the ETG API but a SEPARATE host (api.payota.net).
+ * Non-idempotent: the caller supplies a fresh pay_uuid/init_uuid per attempt.
+ *
+ * PCI: `body` carries raw card data straight to Payota over TLS. logSafe (used
+ * by the shared transport) logs only method/path/status/ms/short-code - NEVER
+ * the request or response body - so no PAN/CVC is written to logs here.
+ */
+export async function payotaCardTokenRequest(
+  path: string,
+  body: Record<string, unknown>,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<RawBookingEnvelope> {
+  const config = getRateHawkConfig();
+  return rawEnvelopeRequest({
+    authConfig: config,
+    baseUrl: getPayotaBaseUrl(),
+    path,
+    body,
+    timeoutMs: options?.timeoutMs,
+    signal: options?.signal,
+  });
 }
 
 /**
