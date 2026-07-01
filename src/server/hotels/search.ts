@@ -6,6 +6,7 @@ import { logServerError } from "@/server/http/response";
 import {
   getLocalHotelContent,
   getLocalHotelDestinationSuggestions,
+  type LocalHotelContent,
 } from "@/server/hotels/content";
 import { buildLiveHotelQuotes, buildRequestHash } from "@/server/providers/ratehawk/hotel-options";
 import {
@@ -62,6 +63,37 @@ type QuoteRow = {
   safe_payload: Record<string, unknown> | null;
   metadata: Record<string, unknown> | null;
   expires_at: string | null;
+};
+
+type ExactHotelSelection = {
+  hotelId: string | null;
+  hid: number | null;
+  name: string | null;
+  countryCode: string | null;
+  regionId: number;
+};
+
+type ExactHotelContent = LocalHotelContent & {
+  hid: number | null;
+  countryCode: string | null;
+};
+
+type SearchQuoteSnapshotInput = {
+  hid: number | null;
+  hotelId: string;
+  name: string;
+  starRating: number | null;
+  imageUrl: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  roomName: string | null;
+  boardBasis?: string | null;
+  priceAmount: number;
+  currency: string;
+  searchHash: string | null;
+  matchHash: string | null;
+  selectedHotel?: ExactHotelSelection;
 };
 
 export type HotelSearchSessionForBooking = SearchSessionRow;
@@ -149,7 +181,8 @@ export async function createHotelSearch(input: HotelSearchInput) {
   const context = await resolveProviderDestination(normalized);
   const token = randomBytes(32).toString("base64url");
   const sessionTokenHash = hashToken(token);
-  const requestHash = buildRequestHash({
+  const exactHotel = buildExactHotelSelection(normalized, context.regionId);
+  const baseRequestHash = buildRequestHash({
     regionId: context.regionId,
     checkin: normalized.checkIn,
     checkout: normalized.checkOut,
@@ -158,6 +191,9 @@ export async function createHotelSearch(input: HotelSearchInput) {
     currency: normalized.currency,
     language: normalized.language,
   });
+  const requestHash = exactHotel
+    ? hashToken(`${baseRequestHash}:hotel:${exactHotel.hotelId ?? exactHotel.hid}`)
+    : baseRequestHash;
   const expiresAt = new Date(Date.now() + HOTEL_SEARCH_TTL_SECONDS * 1000).toISOString();
 
   const created = await admin
@@ -198,9 +234,15 @@ export async function createHotelSearch(input: HotelSearchInput) {
       language: normalized.language,
       limit: MAX_RESULTS,
     };
-    const quotes = await buildLiveHotelQuotes(searchInput, (hotelIds) =>
-      getLocalHotelContent(context.providerId, hotelIds, normalized.language),
-    );
+    const quotes: SearchQuoteSnapshotInput[] = exactHotel
+      ? await buildExactHotelQuotes({
+          ...searchInput,
+          providerId: context.providerId,
+          exactHotel,
+        })
+      : await buildLiveHotelQuotes(searchInput, (hotelIds) =>
+          getLocalHotelContent(context.providerId, hotelIds, normalized.language),
+        );
     const quoteExpiresAt = new Date(Date.now() + QUOTE_TTL_MS).toISOString();
 
     if (quotes.length > 0) {
@@ -228,11 +270,9 @@ export async function createHotelSearch(input: HotelSearchInput) {
               room_name: quote.roomName,
               board_basis: quote.boardBasis ?? null,
               nights: nightsBetween(normalized.checkIn, normalized.checkOut),
+              country_code: quote.selectedHotel?.countryCode ?? null,
             },
-            metadata: {
-              search_hash: quote.searchHash,
-              match_hash: quote.matchHash,
-            },
+            metadata: buildSearchQuoteMetadata(quote),
           })),
         );
 
@@ -246,7 +286,11 @@ export async function createHotelSearch(input: HotelSearchInput) {
 
     if (ready.error) throw ready.error;
 
-    return { searchId, token };
+    return {
+      searchId,
+      token,
+      hotelId: exactHotel && quotes.length > 0 ? quotes[0].hotelId : null,
+    };
   } catch (error) {
     await admin
       .from("hotel_search_sessions")
@@ -347,6 +391,167 @@ export async function getHotelQuoteSnapshotForBooking({
 
   if (result.error) throw result.error;
   return (result.data as unknown as QuoteRow | null) ?? null;
+}
+
+async function buildExactHotelQuotes(input: {
+  providerId: string;
+  regionId: number;
+  checkin: string;
+  checkout: string;
+  residency: string;
+  guests: GuestRoom[];
+  currency: string;
+  language: string;
+  exactHotel: ExactHotelSelection;
+}): Promise<SearchQuoteSnapshotInput[]> {
+  const lookupHotelId =
+    input.exactHotel.hotelId ?? String(input.exactHotel.hid ?? "");
+  if (!lookupHotelId) return [];
+
+  const rates = await searchHotelPage({
+    hotelId: lookupHotelId,
+    checkin: input.checkin,
+    checkout: input.checkout,
+    residency: input.residency,
+    guests: input.guests,
+    currency: input.currency,
+    language: input.language,
+  });
+  const bestRate = rates
+    .filter((rate) => rate.priceAmount > 0)
+    .sort((left, right) => left.priceAmount - right.priceAmount)[0];
+
+  if (!bestRate) return [];
+
+  const content = await loadExactHotelContent({
+    providerId: input.providerId,
+    hotelId: input.exactHotel.hotelId,
+    hid: input.exactHotel.hid,
+    language: input.language,
+  });
+  const resolvedHotelId =
+    content?.hotelId ?? input.exactHotel.hotelId ?? String(input.exactHotel.hid ?? "");
+
+  if (!resolvedHotelId) return [];
+
+  const selectedHotel: ExactHotelSelection = {
+    hotelId: input.exactHotel.hotelId ?? resolvedHotelId,
+    hid: input.exactHotel.hid ?? content?.hid ?? null,
+    name: input.exactHotel.name ?? content?.name ?? null,
+    countryCode: input.exactHotel.countryCode ?? content?.countryCode ?? null,
+    regionId: input.regionId,
+  };
+
+  return [
+    {
+      hid: selectedHotel.hid,
+      hotelId: resolvedHotelId,
+      name: content?.name ?? selectedHotel.name ?? "Hotel",
+      starRating: content?.starRating ?? null,
+      imageUrl: content?.imageUrl ?? null,
+      address: content?.address ?? null,
+      latitude: content?.latitude ?? null,
+      longitude: content?.longitude ?? null,
+      roomName: bestRate.roomName,
+      boardBasis: mapMealToBoardBasis(bestRate.meal),
+      priceAmount: bestRate.priceAmount,
+      currency: bestRate.currency ?? input.currency,
+      searchHash: bestRate.searchHash,
+      matchHash: bestRate.matchHash,
+      selectedHotel,
+    },
+  ];
+}
+
+async function loadExactHotelContent({
+  providerId,
+  hotelId,
+  hid,
+  language,
+}: {
+  providerId: string;
+  hotelId: string | null;
+  hid: number | null;
+  language: string;
+}): Promise<ExactHotelContent | null> {
+  if (!hotelId && !hid) return null;
+
+  if (hotelId) {
+    const byHotelId = await queryExactHotelContent((query) =>
+      query.eq("hotel_id", hotelId),
+      providerId,
+      language,
+    );
+    if (byHotelId) return byHotelId;
+  }
+
+  if (hid) {
+    return queryExactHotelContent((query) => query.eq("hid", hid), providerId, language);
+  }
+
+  return null;
+}
+
+async function queryExactHotelContent(
+  applyFilter: (
+    query: ReturnType<typeof baseExactHotelContentQuery>,
+  ) => ReturnType<typeof baseExactHotelContentQuery>,
+  providerId: string,
+  language: string,
+): Promise<ExactHotelContent | null> {
+  const result = await applyFilter(baseExactHotelContentQuery(providerId, language))
+    .limit(1)
+    .maybeSingle();
+
+  if (result.error) throw result.error;
+  const row = (result.data ?? null) as Record<string, unknown> | null;
+  if (!row) return null;
+
+  const resolvedHotelId = readText(row.hotel_id);
+  const name = readText(row.name);
+  if (!resolvedHotelId || !name) return null;
+
+  return {
+    hotelId: resolvedHotelId,
+    name,
+    hid: readPositiveInteger(row.hid),
+    starRating: readNullableNumber(row.star_rating),
+    imageUrl: readHttpsUrl(row.primary_image_url),
+    address: readText(row.address),
+    latitude: readNullableNumber(row.latitude),
+    longitude: readNullableNumber(row.longitude),
+    countryCode: normalizeCountryCode(row.region_country_code),
+  };
+}
+
+function baseExactHotelContentQuery(providerId: string, language: string) {
+  return getSupabaseAdminClient()
+    .from("provider_hotel_content")
+    .select(
+      "hotel_id,hid,name,star_rating,primary_image_url,address,latitude,longitude,region_country_code",
+    )
+    .eq("provider_id", providerId)
+    .eq("language", language);
+}
+
+function buildSearchQuoteMetadata(quote: SearchQuoteSnapshotInput) {
+  const metadata: Record<string, unknown> = {
+    search_hash: quote.searchHash,
+    match_hash: quote.matchHash,
+  };
+
+  if (quote.selectedHotel) {
+    metadata.selected_suggestion = {
+      type: "hotel",
+      hotel_id: quote.selectedHotel.hotelId,
+      hid: quote.selectedHotel.hid,
+      region_id: quote.selectedHotel.regionId,
+      country_code: quote.selectedHotel.countryCode,
+      name: quote.selectedHotel.name,
+    };
+  }
+
+  return metadata;
 }
 
 async function createHotelPageQuotes(
@@ -544,6 +749,9 @@ function normalizeSearchInput(input: HotelSearchInput) {
   const destinationSlug = input.destinationSlug?.trim().toLowerCase();
   const providerRegionId = Number(input.providerRegionId);
   const destinationName = input.destinationName?.trim();
+  const destinationCountryCode = normalizeCountryCode(input.destinationCountryCode);
+  const selectedHotelId = normalizeSelectedHotelId(input.selectedHotelId);
+  const selectedHid = readPositiveInteger(input.selectedHid);
   const residency = input.residency?.trim().toLowerCase();
   const currency = (input.currency ?? "SAR").trim().toUpperCase();
   const language = (input.language ?? "en").trim().toLowerCase();
@@ -584,6 +792,9 @@ function normalizeSearchInput(input: HotelSearchInput) {
     destinationSlug,
     providerRegionId: hasProviderRegion ? providerRegionId : undefined,
     destinationName: hasProviderRegion ? destinationName : undefined,
+    destinationCountryCode,
+    selectedHotelId,
+    selectedHid,
     checkIn: input.checkIn,
     checkOut: input.checkOut,
     residency,
@@ -591,6 +802,34 @@ function normalizeSearchInput(input: HotelSearchInput) {
     language,
     rooms,
   };
+}
+
+function buildExactHotelSelection(
+  input: ReturnType<typeof normalizeSearchInput>,
+  regionId: number,
+): ExactHotelSelection | null {
+  if (!input.selectedHotelId && !input.selectedHid) return null;
+
+  return {
+    hotelId: input.selectedHotelId ?? null,
+    hid: input.selectedHid ?? null,
+    name: input.destinationName ?? null,
+    countryCode: input.destinationCountryCode ?? null,
+    regionId,
+  };
+}
+
+function normalizeSelectedHotelId(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text || text.length > 160) return null;
+  return /^[A-Za-z0-9._:-]+$/.test(text) ? text : null;
+}
+
+function normalizeCountryCode(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(text) ? text : null;
 }
 
 function normalizeRooms(rooms: HotelGuestRoom[]): GuestRoom[] {
@@ -677,6 +916,11 @@ function readHttpsUrl(value: unknown) {
 function readNullableNumber(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function readPositiveInteger(value: unknown) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
 function isUuid(value: string) {

@@ -63,6 +63,7 @@ export function HeroHotelSearch() {
     setIsSubmitting(true);
 
     try {
+      const isHotelSelection = destination.type === "hotel";
       const response = await fetch("/api/public/hotels/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -70,6 +71,9 @@ export function HeroHotelSearch() {
         body: JSON.stringify({
           providerRegionId: destination.regionId,
           destinationName: destination.name,
+          destinationCountryCode: destination.countryCode,
+          selectedHotelId: isHotelSelection ? destination.hotelId : undefined,
+          selectedHid: isHotelSelection ? destination.hid : undefined,
           checkIn,
           checkOut,
           residency,
@@ -83,7 +87,7 @@ export function HeroHotelSearch() {
       });
       const payload = (await response.json()) as {
         ok?: boolean;
-        data?: { searchId?: string };
+        data?: { searchId?: string; hotelId?: string | null };
         message?: string;
       };
 
@@ -91,7 +95,15 @@ export function HeroHotelSearch() {
         throw new Error(payload.message || "Hotel search is unavailable.");
       }
 
-      router.push(`/hotels?search=${encodeURIComponent(payload.data.searchId)}`);
+      const searchId = encodeURIComponent(payload.data.searchId);
+      const hotelId = payload.data.hotelId;
+
+      if (hotelId) {
+        router.push(`/hotels/${encodeURIComponent(hotelId)}?search=${searchId}`);
+        return;
+      }
+
+      router.push(`/hotels?search=${searchId}`);
     } catch (caught) {
       setError(
         caught instanceof Error && caught.message

@@ -9,6 +9,9 @@ export type HotelSearchInput = {
   destinationSlug?: string;
   providerRegionId?: number;
   destinationName?: string;
+  destinationCountryCode?: string | null;
+  selectedHotelId?: string | null;
+  selectedHid?: number | null;
   checkIn: string;
   checkOut: string;
   residency: string;

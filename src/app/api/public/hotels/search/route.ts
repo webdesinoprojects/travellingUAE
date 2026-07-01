@@ -36,7 +36,10 @@ export async function POST(request: NextRequest) {
   try {
     const body = await readJsonObject(request);
     const result = await createHotelSearch(body as unknown as HotelSearchInput);
-    const response = jsonOk({ searchId: result.searchId }, { status: 201 });
+    const response = jsonOk(
+      { searchId: result.searchId, hotelId: result.hotelId },
+      { status: 201 },
+    );
 
     response.cookies.set(HOTEL_SEARCH_COOKIE, result.token, {
       httpOnly: true,
