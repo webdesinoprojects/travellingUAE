@@ -658,14 +658,17 @@ export function buildStartBookingRequest(
   };
 
   if (input.payment.type === "now") {
-    // Standalone hotel booking does not use `now`; this preserves the shared
-    // helper shape for the separate ETG card-token/3DS implementation.
+    // ETG requires the card-token identifiers INSIDE payment_type (verified against
+    // the official ETG docs + RateHawk card-payment guide):
+    //   payment_type: { type, amount, currency_code, init_uuid, pay_uuid }
+    // with return_path at the TOP level. Sending init_uuid/pay_uuid at the top level
+    // makes ETG reject Start Booking with `not_enough_credit_card_data`.
     body.return_path = assertNonEmpty("payment.returnPath", input.payment.returnPath);
     if (input.payment.initUuid) {
-      body.init_uuid = input.payment.initUuid;
+      paymentType.init_uuid = input.payment.initUuid;
     }
     if (input.payment.payUuid) {
-      body.pay_uuid = input.payment.payUuid;
+      paymentType.pay_uuid = input.payment.payUuid;
     }
   }
 

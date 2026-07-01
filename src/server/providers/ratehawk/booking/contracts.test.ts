@@ -358,7 +358,7 @@ test("buildStartBookingRequest uses official nested shape (partner/payment_type/
   });
 });
 
-test("buildStartBookingRequest puts return_path at top-level for 'now'", () => {
+test("buildStartBookingRequest nests init_uuid/pay_uuid in payment_type for 'now' (return_path top-level)", () => {
   assert.throws(
     () =>
       buildStartBookingRequest({
@@ -385,10 +385,19 @@ test("buildStartBookingRequest puts return_path at top-level for 'now'", () => {
     },
   });
   const pt = ok.payment_type as Record<string, unknown>;
-  assert.deepEqual(pt, { type: "now", amount: "40.85", currency_code: "EUR" });
+  // ETG requires init_uuid/pay_uuid INSIDE payment_type; return_path stays top-level.
+  assert.deepEqual(pt, {
+    type: "now",
+    amount: "40.85",
+    currency_code: "EUR",
+    init_uuid: "init-1",
+    pay_uuid: "pay-1",
+  });
   assert.equal(ok.return_path, "https://flytime.example/return");
-  assert.equal(ok.init_uuid, "init-1");
-  assert.equal(ok.pay_uuid, "pay-1");
+  // Must NOT be duplicated at the top level (top-level placement caused ETG
+  // to reject Start Booking with not_enough_credit_card_data).
+  assert.equal("init_uuid" in ok, false);
+  assert.equal("pay_uuid" in ok, false);
 });
 
 test("buildStartBookingRequest rejects placeholder guest names", () => {

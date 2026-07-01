@@ -1337,6 +1337,8 @@ export async function finishStandaloneHotelNowBooking(input: {
     returnPath,
   });
 
+  logStandaloneNowFinishAttempt(claimed.id, selected, returnPath);
+
   let finishSignal: Awaited<ReturnType<typeof rateHawkBookingRequest>>;
   try {
     finishSignal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.bookingFinish, finishBody, {
@@ -1423,6 +1425,31 @@ function logStandaloneNowFailure(
     providerStatus: safeLogText(envelope.status, 40),
     providerCode: sanitizeProviderCode(envelope.error),
     httpStatus: envelope.httpStatus,
+  });
+}
+
+/**
+ * Presence-only debug for the ETG `now` Start Booking call. Logs booleans + the
+ * return-path host so we can confirm the card-token identifiers reached finish.
+ * NEVER logs the raw uuids/tokens, card data, or provider hashes.
+ */
+function logStandaloneNowFinishAttempt(
+  checkoutId: string,
+  selected: SelectedPaymentType,
+  returnPath: string,
+): void {
+  let returnPathHost: string | null = null;
+  try {
+    returnPathHost = new URL(returnPath).host;
+  } catch {
+    returnPathHost = null;
+  }
+  console.info("[standalone.hotel.now.finish.attempt]", {
+    checkoutId: safeLogText(checkoutId, 80),
+    paymentType: selected.type,
+    hasInitUuid: Boolean(selected.initUuid),
+    hasPayUuid: Boolean(selected.payUuid),
+    returnPathHost,
   });
 }
 

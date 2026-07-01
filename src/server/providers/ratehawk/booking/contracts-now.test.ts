@@ -115,7 +115,7 @@ test("buildCreateCreditCardTokenRequest rejects bad card/uuid/month input", () =
   );
 });
 
-test("buildStartBookingRequest (now) includes return_path + init/pay uuid", () => {
+test("buildStartBookingRequest (now) nests init_uuid/pay_uuid inside payment_type", () => {
   const body = buildStartBookingRequest({
     partner: { partnerOrderId: "po-1" },
     language: "en",
@@ -131,14 +131,85 @@ test("buildStartBookingRequest (now) includes return_path + init/pay uuid", () =
     },
   });
 
-  assert.equal(body.return_path, "https://example.com/return");
-  assert.equal(body.init_uuid, U1);
-  assert.equal(body.pay_uuid, U2);
+  // ETG requires init_uuid/pay_uuid INSIDE payment_type (not top-level), or it
+  // rejects Start Booking with not_enough_credit_card_data.
   assert.deepEqual(body.payment_type, {
     type: "now",
     amount: "100.00",
     currency_code: "USD",
+    init_uuid: U1,
+    pay_uuid: U2,
   });
+  assert.equal(body.return_path, "https://example.com/return");
+  // Regression guard: must NOT be duplicated at the top level.
+  assert.equal("init_uuid" in body, false);
+  assert.equal("pay_uuid" in body, false);
+});
+
+test("stored camelCase selection maps to snake_case payment_type at finish", () => {
+  // Exact DB round-trip: tokenization stores camelCase initUuid/payUuid; finish
+  // reads them back and MUST emit snake_case init_uuid/pay_uuid inside payment_type.
+  const stored = buildStoredNowSelectedPayment(
+    {
+      type: "now",
+      amount: "3.00",
+      currencyCode: "USD",
+      isNeedCreditCardData: true,
+      isNeedCvc: true,
+    },
+    { initUuid: U1, payUuid: U2, returnPath: "https://example.com/return" },
+  );
+  assert.equal(stored.initUuid, U1);
+  assert.equal(stored.payUuid, U2);
+
+  const body = buildStartBookingRequest({
+    partner: { partnerOrderId: "po-1" },
+    language: "en",
+    user: { email: "guest@example.com" },
+    rooms: [{ guests: [{ firstName: "Ratehawk", lastName: "Test" }] }],
+    payment: {
+      type: "now",
+      amount: stored.amount,
+      currencyCode: stored.currencyCode,
+      initUuid: stored.initUuid,
+      payUuid: stored.payUuid,
+      returnPath: stored.returnPath,
+    },
+  });
+  const pt = body.payment_type as Record<string, unknown>;
+  assert.equal(pt.init_uuid, U1);
+  assert.equal(pt.pay_uuid, U2);
+  // Test fails if either identifier is absent from the ETG-required location.
+  assert.ok("init_uuid" in pt, "payment_type.init_uuid must be present");
+  assert.ok("pay_uuid" in pt, "payment_type.pay_uuid must be present");
+});
+
+test("now finish body carries no card data anywhere", () => {
+  const body = buildStartBookingRequest({
+    partner: { partnerOrderId: "po-1" },
+    language: "en",
+    user: { email: "guest@example.com" },
+    rooms: [{ guests: [{ firstName: "Ratehawk", lastName: "Test" }] }],
+    payment: {
+      type: "now",
+      amount: "3.00",
+      currencyCode: "USD",
+      initUuid: U1,
+      payUuid: U2,
+      returnPath: "https://example.com/return",
+    },
+  });
+  const serialized = JSON.stringify(body).toLowerCase();
+  for (const forbidden of [
+    "cardnumber",
+    "card_number",
+    "cvc",
+    "expiry",
+    "card_holder",
+    "cardholder",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `finish body must not contain ${forbidden}`);
+  }
 });
 
 test("buildStartBookingRequest (now) requires a return_path", () => {
