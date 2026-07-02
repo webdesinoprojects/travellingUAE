@@ -9,6 +9,7 @@ import {
   type AirhubCountryRegionItem,
   type AirhubPublicCountry,
   buildAirhubCountrySyncPayload,
+  normalizeAirhubCountryCode,
   parseCountryRegionResponse,
 } from "./contracts";
 import { AirhubError } from "./errors";
@@ -49,6 +50,30 @@ export async function getLocalAirhubCountries({
     : countries;
 
   return filtered.slice(0, Math.min(Math.max(limit, 1), 250));
+}
+
+export async function getLocalAirhubCountryByCode(
+  countryCode: string,
+): Promise<AirhubPublicCountry | null> {
+  const normalizedCountryCode = normalizeAirhubCountryCode(countryCode);
+
+  if (!normalizedCountryCode || !hasSupabaseAdminEnv()) {
+    return null;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("airhub_countries")
+    .select("iso_code,name,region_name,flag_url,global_flag_url")
+    .eq("iso_code", normalizedCountryCode)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const row = data as CountryRow | null;
+  return row ? toPublicCountry(row) : null;
 }
 
 export async function fetchAirhubCountryRegionDetail(
@@ -132,13 +157,7 @@ async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
     throw error;
   }
 
-  const countries = ((data ?? []) as CountryRow[]).map((row) => ({
-    isoCode: row.iso_code,
-    name: row.name,
-    regionName: row.region_name,
-    flagUrl: row.flag_url,
-    globalFlagUrl: row.global_flag_url,
-  }));
+  const countries = ((data ?? []) as CountryRow[]).map(toPublicCountry);
 
   countryCache = {
     expiresAt: now + COUNTRY_CACHE_TTL_MS,
@@ -150,4 +169,14 @@ async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
 
 function normalizeSearch(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
+}
+
+function toPublicCountry(row: CountryRow): AirhubPublicCountry {
+  return {
+    isoCode: row.iso_code,
+    name: row.name,
+    regionName: row.region_name,
+    flagUrl: row.flag_url,
+    globalFlagUrl: row.global_flag_url,
+  };
 }

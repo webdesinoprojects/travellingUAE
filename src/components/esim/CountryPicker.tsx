@@ -4,6 +4,10 @@ import { Globe2, Search } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import {
+  getCountryFlagDisplay,
+  type CountryFlagDisplay,
+} from "@/components/esim/country-flag";
 import type { AirhubPublicCountry } from "@/server/providers/airhub/contracts";
 
 export function CountryPicker({
@@ -44,25 +48,7 @@ export function CountryPicker({
         {filteredCountries.length ? (
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filteredCountries.map((country) => (
-              <Link
-                key={country.isoCode}
-                href={`/esim/${country.isoCode.toLowerCase()}`}
-                className="flex min-h-20 items-center gap-3 rounded-lg border border-border-soft bg-white p-4 text-left transition hover:border-brand-blue hover:bg-surface-muted dark:bg-surface-muted dark:hover:border-brand-sand"
-              >
-                <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-sky text-sm font-black text-brand-navy">
-                  {country.isoCode}
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-base font-black">
-                    {country.name}
-                  </span>
-                  {country.regionName ? (
-                    <span className="mt-1 block truncate text-sm font-semibold text-brand-navy/55 dark:text-white/55">
-                      {country.regionName}
-                    </span>
-                  ) : null}
-                </span>
-              </Link>
+              <CountryCard key={country.isoCode} country={country} />
             ))}
           </div>
         ) : (
@@ -75,5 +61,63 @@ export function CountryPicker({
         )}
       </div>
     </section>
+  );
+}
+
+function CountryCard({ country }: { country: AirhubPublicCountry }) {
+  const [flagFailed, setFlagFailed] = useState(false);
+  const flagDisplay = getCountryFlagDisplay({
+    isoCode: country.isoCode,
+    countryName: country.name,
+    flagUrl: country.flagUrl,
+    imageFailed: flagFailed,
+  });
+
+  return (
+    <Link
+      href={`/esim/${country.isoCode.toLowerCase()}`}
+      className="flex min-h-20 items-center gap-3 rounded-lg border border-border-soft bg-white p-4 text-left transition hover:border-brand-blue hover:bg-surface-muted dark:bg-surface-muted dark:hover:border-brand-sand"
+    >
+      <CountryFlag display={flagDisplay} onImageError={() => setFlagFailed(true)} />
+      <span className="min-w-0">
+        <span className="block truncate text-base font-black">
+          {country.name}
+        </span>
+        {country.regionName ? (
+          <span className="mt-1 block truncate text-sm font-semibold text-brand-navy/55 dark:text-white/55">
+            {country.regionName}
+          </span>
+        ) : null}
+      </span>
+    </Link>
+  );
+}
+
+function CountryFlag({
+  display,
+  onImageError,
+}: {
+  display: CountryFlagDisplay;
+  onImageError: () => void;
+}) {
+  if (display.kind === "image") {
+    return (
+      <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-border-soft bg-white">
+        {/* eslint-disable-next-line @next/next/no-img-element -- Airhub returns remote SVG flag URLs; use img to avoid next/image remote SVG config. */}
+        <img
+          src={display.src}
+          alt={display.alt}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          onError={onImageError}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-sky text-sm font-black text-brand-navy">
+      {display.label}
+    </span>
   );
 }

@@ -12,6 +12,9 @@ export type AirhubErrorCode =
   | "stripe_payment_required"
   | "duplicate_webhook_ignored";
 
+export const AIRHUB_PLAN_FETCH_UNAVAILABLE_MESSAGE =
+  "Plan fetching is temporarily unavailable.";
+
 export class AirhubError extends Error {
   readonly code: AirhubErrorCode;
   readonly status: number;
@@ -26,4 +29,24 @@ export class AirhubError extends Error {
 
 export function isAirhubError(error: unknown): error is AirhubError {
   return error instanceof AirhubError;
+}
+
+export function toSafeAirhubPlanFetchFailure(error: unknown):
+  | {
+      ok: false;
+      code: "airhub_plan_fetch_failed";
+      message: string;
+      status: number;
+    }
+  | null {
+  if (!isAirhubError(error) || error.code !== "airhub_plan_fetch_failed") {
+    return null;
+  }
+
+  return {
+    ok: false,
+    code: "airhub_plan_fetch_failed",
+    message: AIRHUB_PLAN_FETCH_UNAVAILABLE_MESSAGE,
+    status: error.status,
+  };
 }

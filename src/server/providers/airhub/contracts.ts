@@ -22,6 +22,7 @@ export type AirhubPlanInformationRequest = {
   partnerCode: number;
   flag: number;
   countryCode?: string;
+  multiplecountrycode?: string[];
 };
 
 export type AirhubPurchaseSimRequest = {
@@ -171,6 +172,9 @@ export function buildPlanInformationRequest(input: {
 
   if (input.countryCode) {
     body.countryCode = input.countryCode;
+    // Airhub's current GetPlanInformation validation requires this array even
+    // when countryCode is present. Keep both fields to satisfy docs + provider.
+    body.multiplecountrycode = [input.countryCode];
   }
 
   return body;
@@ -317,6 +321,46 @@ export function parsePlanInformationResponse(response: unknown): AirhubPlan[] {
       },
     ];
   });
+}
+
+export function isValidAirhubPlanInformationResponse(response: unknown): boolean {
+  if (Array.isArray(response)) {
+    return true;
+  }
+
+  if (!isRecord(response)) {
+    return false;
+  }
+
+  if (readString(response, "planCode")) {
+    return true;
+  }
+
+  for (const key of ["data", "plans", "items", "result"]) {
+    const value = response[key];
+
+    if (Array.isArray(value)) {
+      return true;
+    }
+  }
+
+  return Object.values(response).some(
+    (value) =>
+      Array.isArray(value) &&
+      value.some((item) => isRecord(item) && readString(item, "planCode")),
+  );
+}
+
+export function normalizeAirhubCountryCode(value: string): string | null {
+  const normalized = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : null;
+}
+
+export function buildAirhubPlanRequestCountryCode(countryCode: string): string {
+  // Airhub's PDF example sends countryCode as lowercase ("us"), while the
+  // country sync endpoint returns uppercase ISO codes. Keep DB/page state
+  // uppercase, but send lowercase to GetPlanInformation.
+  return countryCode.trim().toLowerCase();
 }
 
 export function decideAirhubPlanFetch(input: {

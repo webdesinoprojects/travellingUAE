@@ -9,11 +9,15 @@ import { getAirhubConfig } from "./config";
 import {
   AIRHUB_ENDPOINTS,
   type AirhubPublicPlan,
+  buildAirhubPlanRequestCountryCode,
   decideAirhubPlanFetch,
   buildPlanInformationRequest,
   buildPublicPlanDto,
+  isValidAirhubPlanInformationResponse,
+  normalizeAirhubCountryCode,
   parsePlanInformationResponse,
 } from "./contracts";
+import { AIRHUB_PLAN_FETCH_UNAVAILABLE_MESSAGE, AirhubError } from "./errors";
 
 export type AirhubPlanListing = {
   countryCode: string;
@@ -64,13 +68,24 @@ export async function getAirhubPlansForCountry(
   const body = buildPlanInformationRequest({
     partnerCode: config.partnerCode,
     flag: 5,
-    countryCode: normalizedCountryCode.toLowerCase(),
+    countryCode: buildAirhubPlanRequestCountryCode(normalizedCountryCode),
   });
   const response = await airhubJsonRequest<unknown>(AIRHUB_ENDPOINTS.planInformation, {
     method: "POST",
     body,
     errorCode: "airhub_plan_fetch_failed",
   });
+
+  if (!isValidAirhubPlanInformationResponse(response)) {
+    logInvalidAirhubPlanResponse(body, response);
+
+    throw new AirhubError(
+      "airhub_plan_fetch_failed",
+      AIRHUB_PLAN_FETCH_UNAVAILABLE_MESSAGE,
+      502,
+    );
+  }
+
   const plans = parsePlanInformationResponse(response).map(buildPublicPlanDto);
   await writePlanCache({
     requestHash,
@@ -119,11 +134,63 @@ export function buildPlanRequestHash(input: {
 }
 
 function normalizeCountryCode(countryCode: string) {
-  const normalized = countryCode.trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(normalized)) {
+  const normalized = normalizeAirhubCountryCode(countryCode);
+  if (!normalized) {
     throw new Error("Invalid country code");
   }
   return normalized;
+}
+
+function logInvalidAirhubPlanResponse(body: unknown, response: unknown) {
+  const requestBody = isRecord(body) ? body : {};
+
+  console.error("[airhub.plan.fetch.failed]", {
+    endpoint: AIRHUB_ENDPOINTS.planInformation,
+    partnerCodePresent: requestBody.partnerCode != null,
+    flag: typeof requestBody.flag === "number" ? requestBody.flag : null,
+    countryCode:
+      typeof requestBody.countryCode === "string" ? requestBody.countryCode : null,
+    httpStatus: 200,
+    providerSnippet: safeProviderSnippet(response),
+    requestId: null,
+  });
+}
+
+function safeProviderSnippet(response: unknown) {
+  if (!isRecord(response)) {
+    return null;
+  }
+
+  const message =
+    readRecordString(response, "message") ??
+    readRecordString(response, "error") ??
+    readRecordString(response, "title");
+  const jsonSnippet = JSON.stringify(response);
+
+  return sanitizeProviderSnippet(message ? `${message} ${jsonSnippet}` : jsonSnippet);
+}
+
+function sanitizeProviderSnippet(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/"token"\s*:\s*"[^"]+"/gi, '"token":"[redacted]"')
+    .replace(/"password"\s*:\s*"[^"]+"/gi, '"password":"[redacted]"')
+    .replace(/"userName"\s*:\s*"[^"]+"/gi, '"userName":"[redacted]"')
+    .slice(0, 500);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readRecordString(source: Record<string, unknown>, key: string) {
+  const value = source[key];
+  return typeof value === "string" ? value : null;
 }
 
 async function readPlanCache(

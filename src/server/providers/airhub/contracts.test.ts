@@ -6,6 +6,7 @@ import {
   buildAirhubCountrySyncPayload,
   buildAirhubCountrySyncPayloadFromItems,
   buildAirhubCountryUpsertRows,
+  buildAirhubPlanRequestCountryCode,
   buildBearerHeaders,
   buildEsimStripeMetadata,
   buildLoginRequest,
@@ -15,14 +16,22 @@ import {
   buildPurchaseSimRequest,
   decideAirhubPlanFetch,
   decideAirhubPurchaseStart,
+  isValidAirhubPlanInformationResponse,
+  normalizeAirhubCountryCode,
   parseCountryRegionResponse,
   parseLoginToken,
   parsePlanInformationResponse,
 } from "./contracts.ts";
+import { AirhubError, toSafeAirhubPlanFetchFailure } from "./errors.ts";
 import {
   generateAirhubUniqueOrderId,
   hashAirhubLookupToken,
 } from "./order-ids.ts";
+import { buildAirhubCountryPlanPageModel } from "./page-model.ts";
+import {
+  getCountryFlagDisplay,
+  getSafeAirhubFlagUrl,
+} from "../../../components/esim/country-flag.ts";
 
 test("login request uses Airhub userName/password fields", () => {
   assert.deepEqual(
@@ -50,14 +59,36 @@ test("bearer headers inject Authorization without exposing credentials", () => {
   });
 });
 
-test("GetPlanInformation request uses partnerCode, flag, and countryCode", () => {
+test("GetPlanInformation request uses partnerCode, flag, countryCode, and multiplecountrycode", () => {
   assert.deepEqual(
     buildPlanInformationRequest({
       partnerCode: 89508211,
       flag: 5,
       countryCode: "us",
     }),
-    { partnerCode: 89508211, flag: 5, countryCode: "us" },
+    {
+      partnerCode: 89508211,
+      flag: 5,
+      countryCode: "us",
+      multiplecountrycode: ["us"],
+    },
+  );
+});
+
+test("Airhub plan requests send lowercase countryCode array while route state normalizes uppercase", () => {
+  assert.equal(normalizeAirhubCountryCode("in"), "IN");
+  assert.deepEqual(
+    buildPlanInformationRequest({
+      partnerCode: 89508211,
+      flag: 5,
+      countryCode: buildAirhubPlanRequestCountryCode("IN"),
+    }),
+    {
+      partnerCode: 89508211,
+      flag: 5,
+      countryCode: "in",
+      multiplecountrycode: ["in"],
+    },
   );
 });
 
@@ -110,6 +141,51 @@ test("country upsert payload maps Airhub name/code/flag correctly", () => {
       synced_at: "2026-07-02T00:00:00.000Z",
     },
   ]);
+});
+
+test("country card uses flag image when flag_url exists", () => {
+  assert.deepEqual(
+    getCountryFlagDisplay({
+      isoCode: "IN",
+      countryName: "India",
+      flagUrl: "https://www.airhubapp.jp/assets/flags/India.svg",
+    }),
+    {
+      kind: "image",
+      src: "https://www.airhubapp.jp/assets/flags/India.svg",
+      alt: "India flag",
+    },
+  );
+});
+
+test("country card falls back to ISO badge when flag_url is missing", () => {
+  assert.deepEqual(
+    getCountryFlagDisplay({
+      isoCode: "IN",
+      countryName: "India",
+      flagUrl: null,
+    }),
+    { kind: "badge", label: "IN" },
+  );
+});
+
+test("country card falls back to ISO badge after flag image error", () => {
+  assert.deepEqual(
+    getCountryFlagDisplay({
+      isoCode: "AX",
+      countryName: "Aland Islands",
+      flagUrl: "https://www.airhubapp.jp/assets/flags/Aland Islands.svg",
+      imageFailed: true,
+    }),
+    { kind: "badge", label: "AX" },
+  );
+});
+
+test("Airhub flag URL with spaces is encoded safely", () => {
+  assert.equal(
+    getSafeAirhubFlagUrl("https://www.airhubapp.jp/assets/flags/Aland Islands.svg"),
+    "https://www.airhubapp.jp/assets/flags/Aland%20Islands.svg",
+  );
 });
 
 test("empty country response stays empty; no handwritten fallback becomes real data", () => {
@@ -282,6 +358,84 @@ test("plan parser uses Airhub response fields without inventing plans", () => {
       phoneNumber: null,
     },
   ]);
+});
+
+test("/esim/in page model normalizes to IN and renders a safe empty state", () => {
+  const model = buildAirhubCountryPlanPageModel({
+    routeCountryCode: "in",
+    country: {
+      isoCode: "IN",
+      name: "India",
+      regionName: null,
+      flagUrl: null,
+      globalFlagUrl: null,
+    },
+    plans: [],
+    planStatus: "ok",
+  });
+
+  assert.equal(model.countryCode, "IN");
+  assert.equal(model.countryName, "India");
+  assert.equal(model.state, "empty");
+});
+
+test("missing Airhub country produces safe country-not-available page state", () => {
+  const model = buildAirhubCountryPlanPageModel({
+    routeCountryCode: "zz",
+    country: null,
+    plans: [],
+    planStatus: "ok",
+  });
+
+  assert.equal(model.countryCode, "ZZ");
+  assert.equal(model.countryName, null);
+  assert.equal(model.state, "country_not_available");
+});
+
+test("Airhub plan fetch failure produces safe page state", () => {
+  const model = buildAirhubCountryPlanPageModel({
+    routeCountryCode: "IN",
+    country: {
+      isoCode: "IN",
+      name: "India",
+      regionName: null,
+      flagUrl: null,
+      globalFlagUrl: null,
+    },
+    plans: [],
+    planStatus: "fetch_failed",
+  });
+
+  assert.equal(model.state, "fetch_failed");
+  assert.deepEqual(model.plans, []);
+});
+
+test("public plan API can return safe JSON for provider 502", () => {
+  assert.deepEqual(
+    toSafeAirhubPlanFetchFailure(
+      new AirhubError("airhub_plan_fetch_failed", "Airhub request failed.", 502),
+    ),
+    {
+      ok: false,
+      code: "airhub_plan_fetch_failed",
+      message: "Plan fetching is temporarily unavailable.",
+      status: 502,
+    },
+  );
+});
+
+test("empty Airhub plan response is valid and produces no plans", () => {
+  const response = { isSuccess: true, data: [] };
+
+  assert.equal(isValidAirhubPlanInformationResponse(response), true);
+  assert.deepEqual(parsePlanInformationResponse(response), []);
+});
+
+test("invalid Airhub plan shape is not valid and does not throw while parsing", () => {
+  const response = { isSuccess: true, message: "Successful" };
+
+  assert.equal(isValidAirhubPlanInformationResponse(response), false);
+  assert.deepEqual(parsePlanInformationResponse(response), []);
 });
 
 test("plan and country endpoints are separate from PurchaseSim", () => {
