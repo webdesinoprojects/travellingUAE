@@ -1,7 +1,7 @@
 import { ArrowLeft, WifiOff } from "lucide-react";
 import Link from "next/link";
 
-import { PlanCard } from "@/components/esim/PlanCard";
+import { PaginatedPlanGrid } from "@/components/esim/PaginatedPlanGrid";
 import type {
   AirhubPublicCountry,
   AirhubPublicPlan,
@@ -85,15 +85,12 @@ export default async function EsimCountryPage({
         </div>
       </header>
 
-      <section className="mx-auto grid w-full max-w-[1180px] gap-5 px-4 py-8 sm:px-6 lg:grid-cols-3">
+      <section className="mx-auto w-full max-w-[1180px] px-4 py-8 sm:px-6">
         {pageModel.state === "ready" ? (
-          pageModel.plans.map((plan) => (
-            <PlanCard
-              key={plan.planCode}
-              plan={plan}
-              countryCode={displayCountryCode}
-            />
-          ))
+          <PaginatedPlanGrid
+            plans={pageModel.plans}
+            countryCode={displayCountryCode}
+          />
         ) : (
           <PlanEmptyState state={pageModel.state} />
         )}
@@ -106,7 +103,7 @@ function PlanEmptyState({ state }: { state: AirhubCountryPlanPageModel["state"] 
   const copy = getEmptyStateCopy(state);
 
   return (
-    <div className="rounded-lg border border-border-soft bg-surface p-8 lg:col-span-3">
+    <div className="rounded-lg border border-border-soft bg-surface p-8">
       <WifiOff className="size-10 text-brand-blue" aria-hidden="true" />
       <h2 className="mt-4 text-2xl font-black">{copy.title}</h2>
       <p className="mt-2 max-w-2xl text-brand-navy/60 dark:text-white/60">

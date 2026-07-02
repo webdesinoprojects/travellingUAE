@@ -8,7 +8,13 @@ import {
   getCountryFlagDisplay,
   type CountryFlagDisplay,
 } from "@/components/esim/country-flag";
+import {
+  buildPaginationSummary,
+  PaginationControls,
+} from "@/components/esim/PaginationControls";
 import type { AirhubPublicCountry } from "@/server/providers/airhub/contracts";
+
+const COUNTRIES_PER_PAGE = 24;
 
 export function CountryPicker({
   countries,
@@ -16,18 +22,29 @@ export function CountryPicker({
   countries: AirhubPublicCountry[];
 }) {
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const filteredCountries = useMemo(() => {
     const term = query.trim().toLowerCase();
-    if (!term) return countries.slice(0, 80);
+    if (!term) return countries;
 
-    return countries
-      .filter((country) =>
-        [country.name, country.isoCode, country.regionName]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(term)),
-      )
-      .slice(0, 80);
+    return countries.filter((country) =>
+      [country.name, country.isoCode, country.regionName]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(term)),
+    );
   }, [countries, query]);
+  const totalPages = Math.max(1, Math.ceil(filteredCountries.length / COUNTRIES_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleCountries = useMemo(() => {
+    const start = (currentPage - 1) * COUNTRIES_PER_PAGE;
+    return filteredCountries.slice(start, start + COUNTRIES_PER_PAGE);
+  }, [filteredCountries, currentPage]);
+  const summary = buildPaginationSummary({
+    page: currentPage,
+    pageSize: COUNTRIES_PER_PAGE,
+    total: filteredCountries.length,
+    itemLabel: "countries",
+  });
 
   return (
     <section className="mx-auto w-full max-w-[1080px] px-4 py-8 sm:px-6">
@@ -39,18 +56,41 @@ export function CountryPicker({
           <Search className="size-5 shrink-0 text-brand-blue" aria-hidden="true" />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
             placeholder="Search country"
             className="min-w-0 flex-1 bg-transparent text-base font-bold text-brand-navy outline-none placeholder:text-brand-navy/45 dark:text-white dark:placeholder:text-white/45"
           />
         </div>
 
         {filteredCountries.length ? (
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredCountries.map((country) => (
-              <CountryCard key={country.isoCode} country={country} />
-            ))}
-          </div>
+          <>
+            <div className="mt-5">
+              <PaginationControls
+                page={currentPage}
+                totalPages={totalPages}
+                summary={summary}
+                onPageChange={setPage}
+              />
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleCountries.map((country) => (
+                <CountryCard key={country.isoCode} country={country} />
+              ))}
+            </div>
+            {totalPages > 1 ? (
+              <div className="mt-5">
+                <PaginationControls
+                  page={currentPage}
+                  totalPages={totalPages}
+                  summary={summary}
+                  onPageChange={setPage}
+                />
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className="mt-5 rounded-lg border border-dashed border-border-soft p-8 text-center">
             <Globe2 className="mx-auto size-8 text-brand-blue" aria-hidden="true" />
