@@ -5,11 +5,13 @@ import { getSupabaseAdminClient, hasSupabaseAdminEnv } from "@/server/supabase/c
 import { airhubJsonRequest } from "./client";
 import {
   AIRHUB_ENDPOINTS,
+  type AirhubCountrySyncPayload,
   type AirhubCountryRegionItem,
   type AirhubPublicCountry,
-  buildAirhubCountryUpsertRows,
+  buildAirhubCountrySyncPayload,
   parseCountryRegionResponse,
 } from "./contracts";
+import { AirhubError } from "./errors";
 
 const COUNTRY_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -52,44 +54,57 @@ export async function getLocalAirhubCountries({
 export async function fetchAirhubCountryRegionDetail(
   flag: 1 | 2,
 ): Promise<AirhubCountryRegionItem[]> {
-  const endpoint = `${AIRHUB_ENDPOINTS.countryRegionDetail}?flag=${flag}`;
-  const response = await airhubJsonRequest<unknown>(endpoint, {
-    method: "GET",
-    errorCode: "airhub_country_fetch_failed",
-  });
+  const response = await fetchAirhubCountryRegionDetailResponse(flag);
 
   return parseCountryRegionResponse(response);
 }
 
-export async function syncAirhubCountriesFromProvider(): Promise<{
-  upserted: number;
-}> {
-  const countries = await fetchAirhubCountryRegionDetail(2);
+export async function syncAirhubCountriesFromProvider(): Promise<
+  Omit<AirhubCountrySyncPayload, "rows"> & { upserted: number }
+> {
+  const response = await fetchAirhubCountryRegionDetailResponse(2);
+  const payload = buildAirhubCountrySyncPayload(
+    response,
+    new Date().toISOString(),
+  );
+
+  if (payload.rows.length === 0) {
+    throw new AirhubError(
+      "airhub_country_fetch_failed",
+      "Airhub country sync returned no valid countries.",
+      502,
+    );
+  }
 
   if (!hasSupabaseAdminEnv()) {
     throw new Error("Supabase admin environment is not configured");
   }
 
   const supabase = getSupabaseAdminClient();
-  const rows = buildAirhubCountryUpsertRows(
-    countries,
-    new Date().toISOString(),
-  );
-
-  if (rows.length === 0) {
-    return { upserted: 0 };
-  }
-
   const { error } = await supabase
     .from("airhub_countries")
-    .upsert(rows, { onConflict: "iso_code" });
+    .upsert(payload.rows, { onConflict: "iso_code" });
 
   if (error) {
     throw error;
   }
 
   countryCache = null;
-  return { upserted: rows.length };
+  return {
+    received: payload.received,
+    valid: payload.valid,
+    duplicatesDropped: payload.duplicatesDropped,
+    upserted: payload.rows.length,
+  };
+}
+
+async function fetchAirhubCountryRegionDetailResponse(flag: 1 | 2) {
+  const endpoint = `${AIRHUB_ENDPOINTS.countryRegionDetail}?flag=${flag}`;
+
+  return airhubJsonRequest<unknown>(endpoint, {
+    method: "GET",
+    errorCode: "airhub_country_fetch_failed",
+  });
 }
 
 export function clearAirhubCountryCacheForTests() {

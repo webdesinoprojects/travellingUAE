@@ -47,6 +47,13 @@ export type AirhubCountryUpsertRow = {
   synced_at: string;
 };
 
+export type AirhubCountrySyncPayload = {
+  received: number;
+  valid: number;
+  duplicatesDropped: number;
+  rows: AirhubCountryUpsertRow[];
+};
+
 export type AirhubPlan = {
   planCode: string;
   planName: string | null;
@@ -201,12 +208,7 @@ export function buildCountryWiseFlagUrl(baseUrl: string, countryCode: string): s
 }
 
 export function parseCountryRegionResponse(response: unknown): AirhubCountryRegionItem[] {
-  if (!isRecord(response) || !Array.isArray(response.countryregiondetail)) {
-    return [];
-  }
-
-  return response.countryregiondetail.flatMap((item) => {
-    if (!isRecord(item)) return [];
+  return readCountryRegionRecords(response).flatMap((item) => {
     const name = readString(item, "name");
     const code = readString(item, "code");
     if (!name || !code) return [];
@@ -226,14 +228,63 @@ export function buildAirhubCountryUpsertRows(
   countries: AirhubCountryRegionItem[],
   syncedAt: string,
 ): AirhubCountryUpsertRow[] {
-  return countries.map((country) => ({
-    iso_code: country.code.toUpperCase(),
-    name: country.name,
-    airhub_code: country.code,
-    flag_url: country.flag ?? null,
-    raw: country.raw,
-    synced_at: syncedAt,
-  }));
+  return buildAirhubCountrySyncPayloadFromItems(countries, syncedAt).rows;
+}
+
+export function buildAirhubCountrySyncPayload(
+  response: unknown,
+  syncedAt: string,
+): AirhubCountrySyncPayload {
+  return buildAirhubCountrySyncPayloadFromItems(
+    readCountryRegionRecords(response).map((item) => ({
+      name: readString(item, "name") ?? "",
+      code: readString(item, "code") ?? "",
+      flag: readString(item, "flag"),
+      raw: item,
+    })),
+    syncedAt,
+  );
+}
+
+export function buildAirhubCountrySyncPayloadFromItems(
+  countries: AirhubCountryRegionItem[],
+  syncedAt: string,
+): AirhubCountrySyncPayload {
+  const rowsByIsoCode = new Map<string, AirhubCountryUpsertRow>();
+  let valid = 0;
+
+  for (const country of countries) {
+    const isoCode = normalizeCountryCode(country.code);
+    const name = normalizeRequiredString(country.name);
+
+    if (!isoCode || !name) {
+      continue;
+    }
+
+    valid += 1;
+    const row: AirhubCountryUpsertRow = {
+      iso_code: isoCode,
+      name,
+      airhub_code: isoCode,
+      flag_url: normalizeOptionalString(country.flag),
+      raw: country.raw,
+      synced_at: syncedAt,
+    };
+    const existing = rowsByIsoCode.get(isoCode);
+
+    if (!existing || isBetterCountryUpsertRow(row, existing)) {
+      rowsByIsoCode.set(isoCode, row);
+    }
+  }
+
+  const rows = Array.from(rowsByIsoCode.values());
+
+  return {
+    received: countries.length,
+    valid,
+    duplicatesDropped: valid - rows.length,
+    rows,
+  };
 }
 
 export function parsePlanInformationResponse(response: unknown): AirhubPlan[] {
@@ -444,4 +495,41 @@ function readBoolean(source: UnknownRecord, key: string): boolean | null {
     if (value.toLowerCase() === "false") return false;
   }
   return null;
+}
+
+function readCountryRegionRecords(response: unknown): UnknownRecord[] {
+  if (!isRecord(response) || !Array.isArray(response.countryregiondetail)) {
+    return [];
+  }
+
+  return response.countryregiondetail.filter(isRecord);
+}
+
+function normalizeCountryCode(value: string | null | undefined): string | null {
+  const normalized = normalizeRequiredString(value)?.toUpperCase();
+  return normalized || null;
+}
+
+function normalizeRequiredString(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized || null;
+}
+
+function normalizeOptionalString(value: string | null | undefined): string | null {
+  return value?.trim() || null;
+}
+
+function isBetterCountryUpsertRow(
+  candidate: AirhubCountryUpsertRow,
+  existing: AirhubCountryUpsertRow,
+) {
+  if (candidate.flag_url && !existing.flag_url) {
+    return true;
+  }
+
+  if (!candidate.flag_url && existing.flag_url) {
+    return false;
+  }
+
+  return candidate.name.length > existing.name.length;
 }

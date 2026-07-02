@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   AIRHUB_ENDPOINTS,
+  buildAirhubCountrySyncPayload,
+  buildAirhubCountrySyncPayloadFromItems,
   buildAirhubCountryUpsertRows,
   buildBearerHeaders,
   buildEsimStripeMetadata,
@@ -113,6 +115,100 @@ test("country upsert payload maps Airhub name/code/flag correctly", () => {
 test("empty country response stays empty; no handwritten fallback becomes real data", () => {
   assert.deepEqual(parseCountryRegionResponse({ countryregiondetail: [] }), []);
   assert.deepEqual(buildAirhubCountryUpsertRows([], "2026-07-02T00:00:00.000Z"), []);
+});
+
+test("duplicate country codes are deduped before upsert", () => {
+  const payload = buildAirhubCountrySyncPayload(
+    {
+      countryregiondetail: [
+        { name: "Aland Islands", code: "AX" },
+        {
+          name: "Aland Islands",
+          code: "AX",
+          flag: "https://www.airhubapp.com/assets/flags/Aland.svg",
+        },
+      ],
+    },
+    "2026-07-02T00:00:00.000Z",
+  );
+
+  assert.equal(payload.received, 2);
+  assert.equal(payload.valid, 2);
+  assert.equal(payload.duplicatesDropped, 1);
+  assert.equal(payload.rows.length, 1);
+  assert.deepEqual(payload.rows[0], {
+    iso_code: "AX",
+    name: "Aland Islands",
+    airhub_code: "AX",
+    flag_url: "https://www.airhubapp.com/assets/flags/Aland.svg",
+    raw: {
+      name: "Aland Islands",
+      code: "AX",
+      flag: "https://www.airhubapp.com/assets/flags/Aland.svg",
+    },
+    synced_at: "2026-07-02T00:00:00.000Z",
+  });
+});
+
+test("lower and upper case country codes normalize to uppercase", () => {
+  const payload = buildAirhubCountrySyncPayload(
+    {
+      countryregiondetail: [
+        { name: "United Kingdom", code: " uk " },
+        { name: "United Kingdom", code: "UK" },
+      ],
+    },
+    "2026-07-02T00:00:00.000Z",
+  );
+
+  assert.equal(payload.rows.length, 1);
+  assert.equal(payload.rows[0].iso_code, "UK");
+  assert.equal(payload.rows[0].airhub_code, "UK");
+  assert.equal(payload.duplicatesDropped, 1);
+});
+
+test("missing country code or name rows are skipped", () => {
+  const payload = buildAirhubCountrySyncPayload(
+    {
+      countryregiondetail: [
+        { name: "", code: "AA" },
+        { name: "Blank code", code: "" },
+        { name: "Only valid", code: "OV" },
+      ],
+    },
+    "2026-07-02T00:00:00.000Z",
+  );
+
+  assert.equal(payload.received, 3);
+  assert.equal(payload.valid, 1);
+  assert.equal(payload.duplicatesDropped, 0);
+  assert.deepEqual(
+    payload.rows.map((row) => row.iso_code),
+    ["OV"],
+  );
+});
+
+test("duplicate stats are calculated after invalid rows are skipped", () => {
+  const payload = buildAirhubCountrySyncPayloadFromItems(
+    [
+      { name: "India", code: "in", raw: { name: "India", code: "in" } },
+      { name: "India Republic", code: "IN", raw: { name: "India Republic", code: "IN" } },
+      { name: "", code: "AE", raw: { name: "", code: "AE" } },
+      { name: "United Arab Emirates", code: "ae", raw: { name: "United Arab Emirates", code: "ae" } },
+    ],
+    "2026-07-02T00:00:00.000Z",
+  );
+
+  assert.equal(payload.received, 4);
+  assert.equal(payload.valid, 3);
+  assert.equal(payload.duplicatesDropped, 1);
+  assert.deepEqual(
+    payload.rows.map((row) => [row.iso_code, row.name]),
+    [
+      ["IN", "India Republic"],
+      ["AE", "United Arab Emirates"],
+    ],
+  );
 });
 
 test("PurchaseSim request sends unique_order_id", () => {
