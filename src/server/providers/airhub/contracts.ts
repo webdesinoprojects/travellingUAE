@@ -38,6 +38,15 @@ export type AirhubCountryRegionItem = {
   raw: UnknownRecord;
 };
 
+export type AirhubCountryUpsertRow = {
+  iso_code: string;
+  name: string;
+  airhub_code: string;
+  flag_url: string | null;
+  raw: UnknownRecord;
+  synced_at: string;
+};
+
 export type AirhubPlan = {
   planCode: string;
   planName: string | null;
@@ -90,6 +99,11 @@ export type AirhubPublicCountry = {
   flagUrl: string | null;
   globalFlagUrl: string | null;
 };
+
+export type AirhubPlanFetchDecision =
+  | { kind: "cache" }
+  | { kind: "disabled" }
+  | { kind: "provider" };
 
 export type AirhubPublicOrder = {
   publicReference: string;
@@ -208,6 +222,20 @@ export function parseCountryRegionResponse(response: unknown): AirhubCountryRegi
   });
 }
 
+export function buildAirhubCountryUpsertRows(
+  countries: AirhubCountryRegionItem[],
+  syncedAt: string,
+): AirhubCountryUpsertRow[] {
+  return countries.map((country) => ({
+    iso_code: country.code.toUpperCase(),
+    name: country.name,
+    airhub_code: country.code,
+    flag_url: country.flag ?? null,
+    raw: country.raw,
+    synced_at: syncedAt,
+  }));
+}
+
 export function parsePlanInformationResponse(response: unknown): AirhubPlan[] {
   return extractPlanRecords(response).flatMap((item) => {
     const planCode = readString(item, "planCode");
@@ -238,6 +266,17 @@ export function parsePlanInformationResponse(response: unknown): AirhubPlan[] {
       },
     ];
   });
+}
+
+export function decideAirhubPlanFetch(input: {
+  enabled: boolean;
+  hasCachedPlans: boolean;
+}): AirhubPlanFetchDecision {
+  if (input.hasCachedPlans) {
+    return { kind: "cache" };
+  }
+
+  return input.enabled ? { kind: "provider" } : { kind: "disabled" };
 }
 
 export function buildEsimStripeMetadata(input: {

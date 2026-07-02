@@ -9,6 +9,7 @@ import { getAirhubConfig } from "./config";
 import {
   AIRHUB_ENDPOINTS,
   type AirhubPublicPlan,
+  decideAirhubPlanFetch,
   buildPlanInformationRequest,
   buildPublicPlanDto,
   parsePlanInformationResponse,
@@ -37,7 +38,12 @@ export async function getAirhubPlansForCountry(
   });
 
   const cached = await readPlanCache(requestHash);
-  if (cached) {
+  const decision = decideAirhubPlanFetch({
+    enabled: config.enabled,
+    hasCachedPlans: Boolean(cached),
+  });
+
+  if (decision.kind === "cache" && cached) {
     return {
       countryCode: normalizedCountryCode,
       status: "ok",
@@ -46,7 +52,7 @@ export async function getAirhubPlansForCountry(
     };
   }
 
-  if (!config.enabled) {
+  if (decision.kind === "disabled") {
     return {
       countryCode: normalizedCountryCode,
       status: "disabled",

@@ -7,6 +7,7 @@ import {
   AIRHUB_ENDPOINTS,
   type AirhubCountryRegionItem,
   type AirhubPublicCountry,
+  buildAirhubCountryUpsertRows,
   parseCountryRegionResponse,
 } from "./contracts";
 
@@ -70,14 +71,10 @@ export async function syncAirhubCountriesFromProvider(): Promise<{
   }
 
   const supabase = getSupabaseAdminClient();
-  const rows = countries.map((country) => ({
-    iso_code: country.code.toUpperCase(),
-    name: country.name,
-    airhub_code: country.code,
-    flag_url: country.flag ?? null,
-    raw: country.raw,
-    synced_at: new Date().toISOString(),
-  }));
+  const rows = buildAirhubCountryUpsertRows(
+    countries,
+    new Date().toISOString(),
+  );
 
   if (rows.length === 0) {
     return { upserted: 0 };

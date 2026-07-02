@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AIRHUB_ENDPOINTS,
+  buildAirhubCountryUpsertRows,
   buildBearerHeaders,
   buildEsimStripeMetadata,
   buildLoginRequest,
@@ -9,6 +11,7 @@ import {
   buildPublicOrderDto,
   buildPublicPlanDto,
   buildPurchaseSimRequest,
+  decideAirhubPlanFetch,
   decideAirhubPurchaseStart,
   parseCountryRegionResponse,
   parseLoginToken,
@@ -78,6 +81,40 @@ test("country/region parser maps countryregiondetail items", () => {
   );
 });
 
+test("country upsert payload maps Airhub name/code/flag correctly", () => {
+  const [country] = parseCountryRegionResponse({
+    isSuccess: true,
+    message: "Successful",
+    countryregiondetail: [
+      {
+        name: "Albania",
+        code: "AL",
+        flag: "https://www.airhubapp.com/assets/flags/Albania.svg",
+      },
+    ],
+  });
+
+  assert.deepEqual(buildAirhubCountryUpsertRows([country], "2026-07-02T00:00:00.000Z"), [
+    {
+      iso_code: "AL",
+      name: "Albania",
+      airhub_code: "AL",
+      flag_url: "https://www.airhubapp.com/assets/flags/Albania.svg",
+      raw: {
+        name: "Albania",
+        code: "AL",
+        flag: "https://www.airhubapp.com/assets/flags/Albania.svg",
+      },
+      synced_at: "2026-07-02T00:00:00.000Z",
+    },
+  ]);
+});
+
+test("empty country response stays empty; no handwritten fallback becomes real data", () => {
+  assert.deepEqual(parseCountryRegionResponse({ countryregiondetail: [] }), []);
+  assert.deepEqual(buildAirhubCountryUpsertRows([], "2026-07-02T00:00:00.000Z"), []);
+});
+
 test("PurchaseSim request sends unique_order_id", () => {
   assert.deepEqual(
     buildPurchaseSimRequest({
@@ -93,6 +130,69 @@ test("PurchaseSim request sends unique_order_id", () => {
       unique_order_id: "airhub_unique_1",
     },
   );
+});
+
+test("plan fetch is disabled when AIRHUB_ENABLED is false and cache is empty", () => {
+  assert.deepEqual(
+    decideAirhubPlanFetch({ enabled: false, hasCachedPlans: false }),
+    { kind: "disabled" },
+  );
+});
+
+test("plan fetch uses provider path when enabled and no cache exists", () => {
+  assert.deepEqual(
+    decideAirhubPlanFetch({ enabled: true, hasCachedPlans: false }),
+    { kind: "provider" },
+  );
+});
+
+test("plan parser uses Airhub response fields without inventing plans", () => {
+  const plans = parsePlanInformationResponse({
+    isSuccess: true,
+    data: [
+      {
+        planCode: "292455",
+        planName: "Sample Airhub Plan",
+        countryName: "United States",
+        currency: "USD",
+        price: 10.5,
+        dataUnit: "GB",
+        validity: "7 Days",
+        network_operator: "T-Mobile",
+      },
+    ],
+  }).map(buildPublicPlanDto);
+
+  assert.deepEqual(plans, [
+    {
+      planCode: "292455",
+      planName: "Sample Airhub Plan",
+      planType: null,
+      countryName: "United States",
+      countryCode: null,
+      currency: "USD",
+      price: 10.5,
+      dataUnit: "GB",
+      validity: "7 Days",
+      validityType: null,
+      capacity: null,
+      connectivity: null,
+      networkOperator: "T-Mobile",
+      countriesCovered: null,
+      travelDateRequirement: null,
+      additionalInfo: null,
+      subscription: null,
+      subscriptionPeriod: null,
+      phoneNumber: null,
+    },
+  ]);
+});
+
+test("plan and country endpoints are separate from PurchaseSim", () => {
+  assert.equal(AIRHUB_ENDPOINTS.countryRegionDetail, "/api/ESIM/Getcountry_regiondetail");
+  assert.equal(AIRHUB_ENDPOINTS.planInformation, "/api/ESIM/GetPlanInformation");
+  assert.notEqual(AIRHUB_ENDPOINTS.planInformation, AIRHUB_ENDPOINTS.purchaseSim);
+  assert.notEqual(AIRHUB_ENDPOINTS.countryRegionDetail, AIRHUB_ENDPOINTS.purchaseSim);
 });
 
 test("purchase is disabled unless explicitly enabled", () => {
