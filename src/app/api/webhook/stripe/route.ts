@@ -7,6 +7,7 @@ import {
   updatePaymentStatusBySession,
 } from "@/server/mutations/bookings";
 import { getStripe, getWebhookSecret } from "@/server/payments/stripe";
+import { handleEsimStripeCheckoutCompleted } from "@/server/providers/airhub/orders";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,19 @@ async function handleStripeEvent(event: Stripe.Event) {
       if (session.metadata?.charge_type === "standalone_hotel_deposit") {
         await handleStandaloneHotelStripePaymentSucceeded({
           checkoutId: session.metadata.standalone_checkout_id,
+          stripeSessionId: session.id,
+          stripePaymentIntentId:
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : null,
+          amountTotal: session.amount_total,
+          currency: session.currency,
+          eventId: event.id,
+        });
+      }
+      if (session.metadata?.charge_type === "esim_airhub") {
+        await handleEsimStripeCheckoutCompleted({
+          orderId: session.metadata.internal_order_id,
           stripeSessionId: session.id,
           stripePaymentIntentId:
             typeof session.payment_intent === "string"
