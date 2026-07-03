@@ -143,6 +143,55 @@ textarea {
   width: min(100% - 2rem, 1500px);
 }
 
+/* Circular flag chip with a periodic "shine" sweep. Used for eSIM country flags. */
+.flag-chip {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9999px;
+}
+
+.flag-chip::after {
+  content: "";
+  position: absolute;
+  top: -30%;
+  left: 0;
+  height: 160%;
+  width: 45%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgb(255 255 255 / 0.85),
+    transparent
+  );
+  transform: translateX(-140%) rotate(8deg);
+  animation: flag-shine 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes flag-shine {
+  0% {
+    transform: translateX(-140%) rotate(8deg);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.7;
+  }
+  55% {
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(240%) rotate(8deg);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flag-chip::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 .modern-card {
   border-radius: 0.5rem;
 }

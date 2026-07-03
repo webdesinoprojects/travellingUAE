@@ -2,7 +2,7 @@
 
 import { Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ESIM_ORDER_FILTERS } from "@/features/admin/esim/status";
 
@@ -20,6 +20,14 @@ export function EsimOrdersToolbar({ status, search }: EsimOrdersToolbarProps) {
   const router = useRouter();
   const [term, setTerm] = useState(search);
 
+  // Sync the input when the URL search param changes (submit / debounce /
+  // browser back-forward) using the "adjust state during render" pattern.
+  const [lastSearch, setLastSearch] = useState(search);
+  if (search !== lastSearch) {
+    setLastSearch(search);
+    setTerm(search);
+  }
+
   function apply(next: { status?: string; q?: string }) {
     const params = new URLSearchParams();
     const nextStatus = next.status ?? status;
@@ -32,6 +40,23 @@ export function EsimOrdersToolbar({ status, search }: EsimOrdersToolbarProps) {
     // Navigating resets pagination back to page 1 (no page param carried over).
     router.push(queryString ? `/admin/esim/orders?${queryString}` : "/admin/esim/orders");
   }
+
+  // Debounced auto-search: navigates 400ms after typing stops, only when the
+  // term differs from the current URL. Enter and the Search button still work.
+  useEffect(() => {
+    const trimmed = term.trim();
+    if (trimmed === search) return;
+
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams();
+      if (status && status !== "all") params.set("status", status);
+      if (trimmed) params.set("q", trimmed);
+      const queryString = params.toString();
+      router.push(queryString ? `/admin/esim/orders?${queryString}` : "/admin/esim/orders");
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [term, search, status, router]);
 
   function clearSearch() {
     setTerm("");

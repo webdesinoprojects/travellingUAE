@@ -5,6 +5,7 @@ import {
   listEsimOrders,
 } from "@/server/admin/esim-orders";
 import { normalizeEsimListQuery } from "@/server/admin/esim-orders-helpers";
+import { EsimAdminTabs } from "@/features/admin/esim/components/EsimAdminTabs";
 import { EsimOrderStats } from "@/features/admin/esim/components/EsimOrderStats";
 import { EsimOrdersPagination } from "@/features/admin/esim/components/EsimOrdersPagination";
 import { EsimOrdersTable } from "@/features/admin/esim/components/EsimOrdersTable";
@@ -30,6 +31,7 @@ export default async function AdminEsimOrdersPage({
     return (
       <div className="grid gap-5">
         <PageHeading />
+        <EsimAdminTabs />
         <NotConfigured />
       </div>
     );
@@ -40,6 +42,7 @@ export default async function AdminEsimOrdersPage({
   return (
     <div className="grid gap-5">
       <PageHeading />
+      <EsimAdminTabs />
       <EsimOrderStats stats={stats} />
       <EsimOrdersToolbar status={query.status} search={query.search} />
       <EsimOrdersTable items={result.items} />

@@ -12,7 +12,7 @@ import {
   buildAirhubCountryPlanPageModel,
   type AirhubCountryPlanPageModel,
 } from "@/server/providers/airhub/page-model";
-import { getAirhubPlansForCountry } from "@/server/providers/airhub/plans";
+import { getVisibleAirhubPlansForCountry } from "@/server/esim/public-plans";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +42,7 @@ export default async function EsimCountryPage({
     });
 
     try {
-      const listing = await getAirhubPlansForCountry(country.isoCode);
+      const listing = await getVisibleAirhubPlansForCountry(country.isoCode);
       plans = listing.plans;
       planStatus = listing.status === "disabled" ? "disabled" : "ok";
     } catch (error) {

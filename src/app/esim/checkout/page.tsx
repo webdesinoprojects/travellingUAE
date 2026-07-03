@@ -2,7 +2,8 @@ import { ArrowLeft, CreditCard } from "lucide-react";
 import Link from "next/link";
 
 import { EsimCheckoutForm } from "@/components/esim/EsimCheckoutForm";
-import { getAirhubPlansForCountry } from "@/server/providers/airhub/plans";
+import { getVisibleAirhubPlansForCountry } from "@/server/esim/public-plans";
+import { getLocalAirhubCountryByCode } from "@/server/providers/airhub/countries";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +15,11 @@ export default async function EsimCheckoutPage({
   const { countryCode, planCode } = await searchParams;
   const normalizedCountryCode = countryCode?.trim().toUpperCase();
   const normalizedPlanCode = planCode?.trim();
-  const listing = normalizedCountryCode
-    ? await getAirhubPlansForCountry(normalizedCountryCode)
+  const country = normalizedCountryCode
+    ? await getLocalAirhubCountryByCode(normalizedCountryCode)
+    : null;
+  const listing = country
+    ? await getVisibleAirhubPlansForCountry(country.isoCode)
     : null;
   const plan =
     listing?.plans.find((item) => item.planCode === normalizedPlanCode) ?? null;

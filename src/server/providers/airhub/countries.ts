@@ -12,6 +12,8 @@ import {
   normalizeAirhubCountryCode,
   parseCountryRegionResponse,
 } from "./contracts";
+import { rankPublicCountries } from "@/server/admin/esim-visibility-helpers";
+
 import { AirhubError } from "./errors";
 
 const COUNTRY_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -22,6 +24,7 @@ type CountryRow = {
   region_name: string | null;
   flag_url: string | null;
   global_flag_url: string | null;
+  display_name_override: string | null;
 };
 
 let countryCache:
@@ -39,17 +42,10 @@ export async function getLocalAirhubCountries({
   limit?: number;
 } = {}): Promise<AirhubPublicCountry[]> {
   const countries = await readAllLocalCountries();
-  const normalizedQuery = normalizeSearch(query);
+  // Relevance ranking: exact ISO > exact name > startsWith > includes > region.
+  const ranked = rankPublicCountries(countries, query ?? "");
 
-  const filtered = normalizedQuery
-    ? countries.filter((country) =>
-        [country.name, country.isoCode, country.regionName]
-          .filter(Boolean)
-          .some((value) => normalizeSearch(value).includes(normalizedQuery)),
-      )
-    : countries;
-
-  return filtered.slice(0, Math.min(Math.max(limit, 1), 250));
+  return ranked.slice(0, Math.min(Math.max(limit, 1), 250));
 }
 
 export async function getLocalAirhubCountryByCode(
@@ -64,8 +60,10 @@ export async function getLocalAirhubCountryByCode(
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("airhub_countries")
-    .select("iso_code,name,region_name,flag_url,global_flag_url")
+    .select("iso_code,name,region_name,flag_url,global_flag_url,display_name_override")
     .eq("iso_code", normalizedCountryCode)
+    // Hidden countries are treated as not found for the public flow.
+    .eq("is_visible", true)
     .maybeSingle();
 
   if (error) {
@@ -136,6 +134,16 @@ export function clearAirhubCountryCacheForTests() {
   countryCache = null;
 }
 
+/**
+ * Invalidate the in-process public country cache so admin visibility/feature/
+ * override changes surface on the public flow without waiting for the TTL. Best
+ * effort across instances: on multi-instance/serverless deployments each instance
+ * clears its own copy and the TTL bounds any residual staleness.
+ */
+export function clearAirhubCountryCache() {
+  countryCache = null;
+}
+
 async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
   if (!hasSupabaseAdminEnv()) {
     return [];
@@ -149,7 +157,11 @@ async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("airhub_countries")
-    .select("iso_code,name,region_name,flag_url,global_flag_url")
+    .select("iso_code,name,region_name,flag_url,global_flag_url,display_name_override")
+    // Only admin-visible countries; featured first, then admin sort order, then name.
+    .eq("is_visible", true)
+    .order("is_featured", { ascending: false })
+    .order("sort_order", { ascending: true })
     .order("name", { ascending: true })
     .limit(400);
 
@@ -167,14 +179,13 @@ async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
   return countries;
 }
 
-function normalizeSearch(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase();
-}
-
 function toPublicCountry(row: CountryRow): AirhubPublicCountry {
+  const override =
+    typeof row.display_name_override === "string" ? row.display_name_override.trim() : "";
   return {
     isoCode: row.iso_code,
-    name: row.name,
+    // Public pages show the admin display-name override when set.
+    name: override || row.name,
     regionName: row.region_name,
     flagUrl: row.flag_url,
     globalFlagUrl: row.global_flag_url,

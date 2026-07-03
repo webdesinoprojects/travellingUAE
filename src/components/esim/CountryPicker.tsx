@@ -142,7 +142,7 @@ function CountryFlag({
 }) {
   if (display.kind === "image") {
     return (
-      <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-border-soft bg-white">
+      <span className="flag-chip grid size-10 shrink-0 place-items-center border border-border-soft bg-white">
         {/* eslint-disable-next-line @next/next/no-img-element -- Airhub returns remote SVG flag URLs; use img to avoid next/image remote SVG config. */}
         <img
           src={display.src}
@@ -156,7 +156,7 @@ function CountryFlag({
   }
 
   return (
-    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-sky text-sm font-black text-brand-navy">
+    <span className="flag-chip grid size-10 shrink-0 place-items-center bg-brand-sky text-sm font-black text-brand-navy">
       {display.label}
     </span>
   );
