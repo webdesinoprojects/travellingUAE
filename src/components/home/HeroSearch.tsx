@@ -2,11 +2,12 @@
 
 import { CalendarDays, MapPinned, Search, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { moreSearchServices, primarySearchServices } from "@/data/travel";
 import { HeroFlightSearch } from "@/components/home/HeroFlightSearch";
 import { HeroHajjUmrahSearch } from "@/components/home/HeroHajjUmrahSearch";
 import { HeroHotelSearch } from "@/components/home/HeroHotelSearch";
+import { HeroEsimSearch } from "@/components/home/HeroEsimSearch";
 import { HeroPackagesSearch } from "@/components/home/HeroPackagesSearch";
 import { HeroTransfersSearch } from "@/components/home/HeroTransfersSearch";
 import { TravelIcon } from "@/components/ui/TravelIcon";
@@ -146,10 +147,10 @@ const serviceCopy: Record<SearchServiceKey, SearchCopy> = {
   "e-sim": {
     whereLabel: "Coverage",
     wherePlaceholder: "Select country",
-    dateLabel: "Activation",
-    travelerLabel: "Devices",
-    travelerPlaceholder: "Devices",
-    submitLabel: "Find e-SIM",
+    dateLabel: "Travel date (optional)",
+    travelerLabel: "",
+    travelerPlaceholder: "",
+    submitLabel: "Find eSIM plans",
     formLabel: "Search e-SIM coverage",
   },
 };
@@ -168,6 +169,7 @@ export function HeroSearch({
   serviceLabels,
 }: HeroSearchProps) {
   const router = useRouter();
+  const moreMenuRef = useRef<HTMLDetailsElement>(null);
   const [destination, setDestination] = useState("");
   const [travelDate, setTravelDate] = useState("");
   const [travelers, setTravelers] = useState("");
@@ -208,6 +210,9 @@ export function HeroSearch({
 
   function handleServiceSelect(service: SearchServiceKey) {
     setSelectedService(service);
+    if (moreMenuRef.current) {
+      moreMenuRef.current.open = false;
+    }
 
     if (typeof window === "undefined") {
       return;
@@ -239,7 +244,7 @@ export function HeroSearch({
           />
         ))}
 
-        <details className="group relative shrink-0">
+        <details ref={moreMenuRef} className="group relative shrink-0">
           <summary
             className={`flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg border px-4 text-sm font-extrabold transition ${
               activeMoreService
@@ -289,6 +294,8 @@ export function HeroSearch({
         <HeroHajjUmrahSearch destinations={destinations} />
       ) : selectedService === "transfers" ? (
         <HeroTransfersSearch destinations={destinations} />
+      ) : selectedService === "e-sim" ? (
+        <HeroEsimSearch />
       ) : (
       <form
         onSubmit={handleSubmit}

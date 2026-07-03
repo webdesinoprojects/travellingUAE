@@ -2,7 +2,6 @@
 
 import { usePathname } from "next/navigation";
 
-import { FloatingSocial } from "@/components/layout/FloatingSocial";
 import { Header } from "@/components/layout/Header";
 import { WhatsAppButton } from "@/components/layout/WhatsAppButton";
 import type { PublicHeaderCopy, PublicLocale } from "@/types/locale";
@@ -40,7 +39,6 @@ export function AppChrome({
       />
       {children}
       <WhatsAppButton />
-      <FloatingSocial />
     </>
   );
 }
