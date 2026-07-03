@@ -20,6 +20,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Smartphone,
   Tags,
   UserRoundCog,
   X,
@@ -33,6 +34,7 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Bookings", href: "/admin/bookings", icon: Inbox },
+  { label: "eSIM", href: "/admin/esim/orders", icon: Smartphone },
   { label: "Destinations", href: "/admin/destinations", icon: MapPin },
   { label: "Trips", href: "/admin/trips", icon: Plane },
   { label: "Categories", href: "/admin/categories", icon: Tags },
