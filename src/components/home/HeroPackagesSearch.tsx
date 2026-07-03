@@ -166,17 +166,33 @@ function ModeTabs({
   mode: PackageMode;
   onSelect: (value: PackageMode) => void;
 }) {
-  const modes: Array<{ value: PackageMode; label: string }> = [
-    { value: "customised", label: "Customised packages" },
-    { value: "ready-made", label: "Ready-made packages" },
-    { value: "flight-hotel", label: "Flight + hotel" },
+  const modes: Array<{
+    value: PackageMode;
+    label: string;
+    mobileLabel: string;
+  }> = [
+    {
+      value: "customised",
+      label: "Customised packages",
+      mobileLabel: "Customised",
+    },
+    {
+      value: "ready-made",
+      label: "Ready-made packages",
+      mobileLabel: "Ready-made",
+    },
+    {
+      value: "flight-hotel",
+      label: "Flight + hotel",
+      mobileLabel: "Flight + hotel",
+    },
   ];
 
   return (
     <div
       role="tablist"
       aria-label="Package type"
-      className="inline-flex w-full max-w-2xl flex-wrap gap-1 self-start rounded-full border border-white/22 bg-white/12 p-1 backdrop-blur-md"
+      className="grid w-full max-w-2xl grid-cols-3 gap-1 self-start rounded-full border border-white/22 bg-white/12 p-1 backdrop-blur-md"
     >
       {modes.map((item) => {
         const isActive = mode === item.value;
@@ -187,14 +203,16 @@ function ModeTabs({
             type="button"
             role="tab"
             aria-selected={isActive}
+            aria-label={item.label}
             onClick={() => onSelect(item.value)}
-            className={`min-h-9 flex-1 rounded-full px-4 text-xs font-extrabold uppercase tracking-[0.08em] transition sm:text-sm sm:normal-case sm:tracking-normal ${
+            className={`min-h-10 min-w-0 rounded-full px-2 text-[11px] font-extrabold tracking-normal transition sm:px-4 sm:text-sm ${
               isActive
                 ? "bg-brand-sand text-brand-navy shadow-[0_6px_18px_rgb(7_23_57/0.25)]"
                 : "text-white hover:bg-white/18"
             }`}
           >
-            {item.label}
+            <span className="block truncate sm:hidden">{item.mobileLabel}</span>
+            <span className="hidden truncate sm:block">{item.label}</span>
           </button>
         );
       })}

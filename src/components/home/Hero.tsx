@@ -54,7 +54,9 @@ export async function Hero({ copy, media, initialService }: HeroProps) {
             <p className="mt-6 max-w-2xl text-lg leading-8 text-white/82 sm:text-xl">
               {copy.description}
             </p>
+          </div>
 
+          <div className="mx-auto w-full max-w-6xl">
             <HeroSearch
               key={initialService}
               destinations={destinationOptions}
@@ -63,7 +65,6 @@ export async function Hero({ copy, media, initialService }: HeroProps) {
               serviceLabels={copy.serviceLabels}
             />
           </div>
-
         </div>
 
         <div className="mt-10 grid gap-3 border-t border-white/18 pt-5 text-white/86 sm:grid-cols-3">
