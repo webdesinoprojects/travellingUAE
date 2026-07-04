@@ -172,6 +172,32 @@ test("rankPublicCountries ranks by relevance and preserves order on ties", () =>
   assert.equal(rankPublicCountries(countries, "  ").length, 4);
 });
 
+test("rankPublicCountries supports UK aliases and ranks UK before Ukraine", () => {
+  const countries = [
+    {
+      isoCode: "UA",
+      name: "Ukraine",
+      regionName: "Europe",
+      aliases: [],
+    },
+    {
+      isoCode: "UK",
+      name: "United Kingdom",
+      regionName: "Europe",
+      aliases: ["GB", "Great Britain", "Wales"],
+    },
+  ];
+
+  assert.deepEqual(
+    rankPublicCountries(countries, "uk").map((country) => country.name),
+    ["United Kingdom", "Ukraine"],
+  );
+  assert.deepEqual(
+    rankPublicCountries(countries, "gb").map((country) => country.name),
+    ["United Kingdom"],
+  );
+});
+
 function row(
   country: string,
   plan: string,

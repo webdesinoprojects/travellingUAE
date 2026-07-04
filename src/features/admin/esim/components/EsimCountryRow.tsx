@@ -29,7 +29,8 @@ export function EsimCountryRow({ country }: { country: AdminCountryItem }) {
   const [override, setOverride] = useState(country.displayNameOverride ?? "");
   const [sortOrder, setSortOrder] = useState(String(country.sortOrder));
 
-  const url = `/api/admin/esim/countries/${encodeURIComponent(country.isoCode)}`;
+  const controlIsoCode = country.controlIsoCode || country.isoCode;
+  const url = `/api/admin/esim/countries/${encodeURIComponent(controlIsoCode)}`;
   const busy = state === "saving";
 
   async function toggleVisible() {
@@ -73,6 +74,7 @@ export function EsimCountryRow({ country }: { country: AdminCountryItem }) {
             <p className="truncate font-black">{country.displayName}</p>
             <p className="truncate text-xs text-brand-brown">
               {country.isoCode}
+              {controlIsoCode !== country.isoCode ? ` / stored: ${controlIsoCode}` : ""}
               {country.displayNameOverride ? ` · provider: ${country.providerName}` : ""}
               {country.regionName ? ` · ${country.regionName}` : ""}
             </p>

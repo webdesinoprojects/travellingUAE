@@ -1,3 +1,5 @@
+import { isUkEsimCountryIdentity } from "../../../lib/esim-country-identity.ts";
+
 export const AIRHUB_ENDPOINTS = {
   login: "/api/Authentication/UserLogin",
   planInformation: "/api/ESIM/GetPlanInformation",
@@ -114,6 +116,7 @@ export type AirhubPublicCountry = {
   regionName: string | null;
   flagUrl: string | null;
   globalFlagUrl: string | null;
+  aliases?: string[];
 };
 
 export type AirhubPlanFetchDecision =
@@ -298,6 +301,7 @@ export function buildAirhubCountrySyncPayloadFromItems(
     }
   }
 
+  collapseDuplicateUkCountryRows(rowsByIsoCode);
   const rows = Array.from(rowsByIsoCode.values());
 
   return {
@@ -770,7 +774,6 @@ function normalizeCountryCode(value: string | null | undefined): string | null {
   const normalized = normalizeProviderCountryIdentifier(value);
   if (!normalized) return null;
   if (normalized === "USA") return "US";
-  if (normalized === "GB") return "UK";
   return normalized;
 }
 
@@ -796,4 +799,20 @@ function isBetterCountryUpsertRow(
   }
 
   return candidate.name.length > existing.name.length;
+}
+
+function collapseDuplicateUkCountryRows(
+  rowsByIsoCode: Map<string, AirhubCountryUpsertRow>,
+) {
+  const gbRow = rowsByIsoCode.get("GB");
+  const ukRow = rowsByIsoCode.get("UK");
+
+  if (
+    gbRow &&
+    ukRow &&
+    isUkEsimCountryIdentity({ isoCode: gbRow.iso_code, name: gbRow.name }) &&
+    isUkEsimCountryIdentity({ isoCode: ukRow.iso_code, name: ukRow.name })
+  ) {
+    rowsByIsoCode.delete("UK");
+  }
 }

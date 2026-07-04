@@ -40,7 +40,7 @@ export async function POST(request: Request) {
 
     // Visible-plan listing already excludes admin-hidden plans, so a hidden plan
     // is not found here and cannot be ordered.
-    const listing = await getVisiblePricedAirhubPlansForCountry(countryCode);
+    const listing = await getVisiblePricedAirhubPlansForCountry(country.isoCode);
 
     if (listing.status === "disabled") {
       return jsonError(503, "eSIM checkout is not available.");
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 
     const order = await createEsimOrderFromPlan({
       plan,
-      countryCode,
+      countryCode: country.isoCode,
       guestName,
       guestEmail,
       guestPhone,

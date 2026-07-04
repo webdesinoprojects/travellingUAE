@@ -12,6 +12,7 @@ import {
   buildPaginationSummary,
   PaginationControls,
 } from "@/components/esim/PaginationControls";
+import { rankEsimCountriesForSearch } from "@/lib/esim-country-identity";
 import type { AirhubPublicCountry } from "@/server/providers/airhub/contracts";
 
 const COUNTRIES_PER_PAGE = 24;
@@ -24,14 +25,7 @@ export function CountryPicker({
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const filteredCountries = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return countries;
-
-    return countries.filter((country) =>
-      [country.name, country.isoCode, country.regionName]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(term)),
-    );
+    return rankEsimCountriesForSearch(countries, query);
   }, [countries, query]);
   const totalPages = Math.max(1, Math.ceil(filteredCountries.length / COUNTRIES_PER_PAGE));
   const currentPage = Math.min(page, totalPages);
@@ -115,7 +109,7 @@ function CountryCard({ country }: { country: AirhubPublicCountry }) {
 
   return (
     <Link
-      href={`/esim/${country.isoCode.toLowerCase()}`}
+      href={`/esim/${country.isoCode.toUpperCase()}`}
       className="flex min-h-20 items-center gap-3 rounded-lg border border-border-soft bg-white p-4 text-left transition hover:border-brand-blue hover:bg-surface-muted dark:bg-surface-muted dark:hover:border-brand-sand"
     >
       <CountryFlag display={flagDisplay} onImageError={() => setFlagFailed(true)} />

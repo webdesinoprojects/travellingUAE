@@ -13,6 +13,7 @@ import type {
   AdminPlanQuery,
   EsimVisibilityFilter,
 } from "@/features/admin/esim/visibility-types";
+import { rankEsimCountriesForSearch } from "../../lib/esim-country-identity.ts";
 
 export const ESIM_PLANS_PAGE_SIZE = 30;
 export const ESIM_COUNTRIES_PAGE_SIZE = 30;
@@ -66,30 +67,16 @@ export function normalizeCountryAdminQuery(input: {
  * is already featured -> sort_order -> name from the DB query.
  */
 export function rankPublicCountries<
-  T extends { isoCode: string; name: string; regionName?: string | null },
+  T extends {
+    isoCode: string;
+    name?: string;
+    displayName?: string;
+    providerName?: string;
+    regionName?: string | null;
+    aliases?: readonly string[] | null;
+  },
 >(countries: T[], rawQuery: string): T[] {
-  const query = rawQuery.trim().toLowerCase();
-  if (!query) return countries;
-
-  const scored: Array<{ country: T; index: number; score: number }> = [];
-  countries.forEach((country, index) => {
-    const name = country.name.toLowerCase();
-    const iso = country.isoCode.toLowerCase();
-    const region = (country.regionName ?? "").toLowerCase();
-
-    let score = -1;
-    if (iso === query) score = 0;
-    else if (name === query) score = 1;
-    else if (name.startsWith(query)) score = 2;
-    else if (iso.startsWith(query)) score = 3;
-    else if (name.includes(query)) score = 4;
-    else if (region && region.includes(query)) score = 5;
-
-    if (score >= 0) scored.push({ country, index, score });
-  });
-
-  scored.sort((a, b) => (a.score !== b.score ? a.score - b.score : a.index - b.index));
-  return scored.map((entry) => entry.country);
+  return rankEsimCountriesForSearch(countries, rawQuery);
 }
 
 export function normalizePlanAdminQuery(input: {

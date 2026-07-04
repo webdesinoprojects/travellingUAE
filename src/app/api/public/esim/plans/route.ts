@@ -22,7 +22,7 @@ export async function GET(request: Request) {
       return jsonError(404, "This eSIM destination is not available.");
     }
 
-    const listing = await getVisibleAirhubPlansForCountry(countryCode);
+    const listing = await getVisibleAirhubPlansForCountry(country.isoCode);
     return jsonOk(listing);
   } catch (error) {
     const safePlanError = toSafeAirhubPlanFetchFailure(error);

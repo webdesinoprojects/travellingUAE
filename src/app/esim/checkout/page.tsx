@@ -74,8 +74,8 @@ export default async function EsimCheckoutPage({
           )}
         </div>
 
-        {plan && normalizedCountryCode ? (
-          <EsimCheckoutForm plan={plan} countryCode={normalizedCountryCode} />
+        {plan && country ? (
+          <EsimCheckoutForm plan={plan} countryCode={country.isoCode} />
         ) : null}
       </section>
     </main>

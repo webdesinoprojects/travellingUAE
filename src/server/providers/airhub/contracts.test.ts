@@ -263,6 +263,42 @@ test("Airhub USA country code is stored as public US with provider code USA", ()
   });
 });
 
+test("Airhub GB/Wales country anomaly keeps the GB control row", () => {
+  const payload = buildAirhubCountrySyncPayload(
+    {
+      countryregiondetail: [{ name: "Wales", code: "GB" }],
+    },
+    "2026-07-02T00:00:00.000Z",
+  );
+
+  assert.deepEqual(payload.rows[0], {
+    iso_code: "GB",
+    name: "Wales",
+    airhub_code: "GB",
+    flag_url: null,
+    raw: { name: "Wales", code: "GB" },
+    synced_at: "2026-07-02T00:00:00.000Z",
+  });
+});
+
+test("Airhub UK country sync does not duplicate UK when GB control row exists", () => {
+  const payload = buildAirhubCountrySyncPayload(
+    {
+      countryregiondetail: [
+        { name: "Wales", code: "GB" },
+        { name: "United Kingdom", code: "UK" },
+      ],
+    },
+    "2026-07-02T00:00:00.000Z",
+  );
+
+  assert.deepEqual(
+    payload.rows.map((row) => row.iso_code),
+    ["GB"],
+  );
+  assert.equal(payload.duplicatesDropped, 1);
+});
+
 test("missing country code or name rows are skipped", () => {
   const payload = buildAirhubCountrySyncPayload(
     {

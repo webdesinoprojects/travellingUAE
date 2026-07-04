@@ -27,7 +27,7 @@ export function EsimCountriesTable({
   return (
     <ul className="grid gap-3">
       {items.map((country) => (
-        <EsimCountryRow key={country.isoCode} country={country} />
+        <EsimCountryRow key={country.controlIsoCode || country.isoCode} country={country} />
       ))}
     </ul>
   );

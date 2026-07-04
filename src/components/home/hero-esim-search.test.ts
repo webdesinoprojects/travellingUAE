@@ -13,7 +13,7 @@ import {
 const countries: AirhubPublicCountry[] = [
   country("IN", "India", "https://www.airhubapp.jp/assets/flags/India.svg"),
   country("ID", "Indonesia", null),
-  country("GB", "United Kingdom", null),
+  country("UK", "United Kingdom", null, ["GB", "Great Britain", "Wales"]),
   country("AE", "United Arab Emirates", null),
   country("IT", "Italy", null),
   country("IE", "Ireland", null),
@@ -28,7 +28,7 @@ test("hero eSIM search limits top suggestions to Airhub country data", () => {
     [
       ["IN", "India"],
       ["ID", "Indonesia"],
-      ["GB", "United Kingdom"],
+      ["UK", "United Kingdom"],
     ],
   );
 });
@@ -41,6 +41,21 @@ test("hero eSIM search matches by country name and ISO code", () => {
   assert.deepEqual(
     filterHeroEsimCountries(countries, "gb").map((item) => item.name),
     ["United Kingdom"],
+  );
+});
+
+test("hero eSIM search ranks United Kingdom ahead of Ukraine for UK", () => {
+  const suggestions = filterHeroEsimCountries(
+    [
+      country("UA", "Ukraine", null),
+      country("UK", "United Kingdom", null, ["GB", "Great Britain", "Wales"]),
+    ],
+    "uk",
+  );
+
+  assert.deepEqual(
+    suggestions.map((item) => item.name),
+    ["United Kingdom", "Ukraine"],
   );
 });
 
@@ -77,6 +92,7 @@ function country(
   isoCode: string,
   name: string,
   flagUrl: string | null,
+  aliases?: string[],
 ): AirhubPublicCountry {
   return {
     isoCode,
@@ -84,5 +100,6 @@ function country(
     regionName: null,
     flagUrl,
     globalFlagUrl: null,
+    aliases,
   };
 }

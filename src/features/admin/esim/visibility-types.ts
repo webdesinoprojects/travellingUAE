@@ -10,9 +10,11 @@ export type EsimVisibilityFilter = "all" | "visible" | "hidden" | "featured";
 
 export type AdminCountryItem = {
   isoCode: string;
+  controlIsoCode: string;
   providerName: string;
   displayName: string;
   displayNameOverride: string | null;
+  aliases: string[];
   flagUrl: string | null;
   regionName: string | null;
   isVisible: boolean;

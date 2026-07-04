@@ -1,4 +1,5 @@
 import type { AirhubPublicCountry } from "@/server/providers/airhub/contracts";
+import { rankEsimCountriesForSearch } from "../../lib/esim-country-identity.ts";
 
 export const HERO_ESIM_SUGGESTION_LIMIT = 6;
 
@@ -7,14 +8,7 @@ export function filterHeroEsimCountries(
   query: string,
   limit = HERO_ESIM_SUGGESTION_LIMIT,
 ) {
-  const normalizedQuery = normalizeSearch(query);
-  const matches = normalizedQuery
-    ? countries.filter((country) =>
-        [country.name, country.isoCode, country.regionName]
-          .filter(Boolean)
-          .some((value) => normalizeSearch(value).includes(normalizedQuery)),
-      )
-    : countries;
+  const matches = rankEsimCountriesForSearch(countries, query);
 
   return matches.slice(0, Math.max(0, limit));
 }
@@ -33,10 +27,6 @@ export function readHeroEsimCountriesResponse(
   }
 
   return countries.filter(isAirhubPublicCountry);
-}
-
-function normalizeSearch(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase();
 }
 
 function isAirhubPublicCountry(value: unknown): value is AirhubPublicCountry {

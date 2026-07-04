@@ -1,6 +1,11 @@
 import "server-only";
 
 import { getSupabaseAdminClient, hasSupabaseAdminEnv } from "@/server/supabase/client";
+import {
+  getEsimCountryIdentity,
+  isUkEsimCountryIdentity,
+  preferUkControlSource,
+} from "@/lib/esim-country-identity";
 
 import { airhubJsonRequest } from "./client";
 import {
@@ -26,6 +31,9 @@ type CountryRow = {
   flag_url: string | null;
   global_flag_url: string | null;
   display_name_override: string | null;
+  is_visible: boolean;
+  is_featured: boolean;
+  sort_order: number;
 };
 
 type PlanLookupCountryRow = {
@@ -66,15 +74,13 @@ export async function getLocalAirhubCountryByCode(
 
   const supabase = getSupabaseAdminClient();
   const columns =
-    "iso_code,name,region_name,flag_url,global_flag_url,display_name_override";
+    "iso_code,name,region_name,flag_url,global_flag_url,display_name_override,is_visible,is_featured,sort_order";
   let query = supabase
     .from("airhub_countries")
-    .select(columns)
-    // Hidden countries are treated as not found for the public flow.
-    .eq("is_visible", true);
+    .select(columns);
 
   query =
-    normalizedCountryCode === "UK"
+    isUkEsimCountryIdentity({ isoCode: normalizedCountryCode })
       ? query.in("iso_code", ["UK", "GB"])
       : query.eq("iso_code", normalizedCountryCode);
 
@@ -85,14 +91,10 @@ export async function getLocalAirhubCountryByCode(
   }
 
   const rows = (data ?? []) as CountryRow[];
-  const row =
-    rows.find((item) => item.iso_code === normalizedCountryCode) ?? rows[0] ?? null;
-  if (!row) return null;
+  const row = selectCountryRowForPublicCode(rows, normalizedCountryCode);
+  if (!row || !row.is_visible) return null;
 
-  const country = toPublicCountry(row);
-  return normalizedCountryCode === "UK" && row.iso_code === "GB"
-    ? { ...country, isoCode: "UK", name: "United Kingdom" }
-    : country;
+  return toPublicCountry(row);
 }
 
 export async function resolveAirhubPlanLookupCountryCode(
@@ -217,9 +219,9 @@ async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("airhub_countries")
-    .select("iso_code,name,region_name,flag_url,global_flag_url,display_name_override")
-    // Only admin-visible countries; featured first, then admin sort order, then name.
-    .eq("is_visible", true)
+    .select(
+      "iso_code,name,region_name,flag_url,global_flag_url,display_name_override,is_visible,is_featured,sort_order",
+    )
     .order("is_featured", { ascending: false })
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true })
@@ -229,7 +231,7 @@ async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
     throw error;
   }
 
-  const countries = ((data ?? []) as CountryRow[]).map(toPublicCountry);
+  const countries = buildPublicCountries((data ?? []) as CountryRow[]);
 
   countryCache = {
     expiresAt: now + COUNTRY_CACHE_TTL_MS,
@@ -240,16 +242,86 @@ async function readAllLocalCountries(): Promise<AirhubPublicCountry[]> {
 }
 
 function toPublicCountry(row: CountryRow): AirhubPublicCountry {
-  const override =
-    typeof row.display_name_override === "string" ? row.display_name_override.trim() : "";
-  return {
+  const identity = getEsimCountryIdentity({
     isoCode: row.iso_code,
-    // Public pages show the admin display-name override when set.
-    name: override || row.name,
+    providerName: row.name,
+    displayNameOverride: row.display_name_override,
+  });
+
+  return {
+    isoCode: identity.isoCode,
+    name: identity.displayName,
     regionName: row.region_name,
     flagUrl: row.flag_url,
     globalFlagUrl: row.global_flag_url,
+    aliases: identity.aliases.length ? identity.aliases : undefined,
   };
+}
+
+function buildPublicCountries(rows: CountryRow[]): AirhubPublicCountry[] {
+  const decorated: Array<{ country: AirhubPublicCountry; source: CountryRow }> = [];
+  let ukSource: CountryRow | null = null;
+
+  for (const row of rows) {
+    if (isUkEsimCountryIdentity({ isoCode: row.iso_code, name: row.name })) {
+      if (
+        preferUkControlSource({
+          candidateIsoCode: row.iso_code,
+          currentIsoCode: ukSource?.iso_code ?? null,
+        })
+      ) {
+        ukSource = row;
+      }
+      continue;
+    }
+
+    if (row.is_visible) {
+      decorated.push({ country: toPublicCountry(row), source: row });
+    }
+  }
+
+  if (ukSource?.is_visible) {
+    decorated.push({ country: toPublicCountry(ukSource), source: ukSource });
+  }
+
+  decorated.sort(comparePublicCountryEntries);
+  return decorated.map((entry) => entry.country);
+}
+
+function selectCountryRowForPublicCode(
+  rows: CountryRow[],
+  normalizedCountryCode: string,
+): CountryRow | null {
+  if (isUkEsimCountryIdentity({ isoCode: normalizedCountryCode })) {
+    let selected: CountryRow | null = null;
+    for (const row of rows) {
+      if (!isUkEsimCountryIdentity({ isoCode: row.iso_code, name: row.name })) continue;
+      if (
+        preferUkControlSource({
+          candidateIsoCode: row.iso_code,
+          currentIsoCode: selected?.iso_code ?? null,
+        })
+      ) {
+        selected = row;
+      }
+    }
+    return selected;
+  }
+
+  return rows.find((item) => item.iso_code === normalizedCountryCode) ?? null;
+}
+
+function comparePublicCountryEntries(
+  a: { country: AirhubPublicCountry; source: CountryRow },
+  b: { country: AirhubPublicCountry; source: CountryRow },
+) {
+  if (a.source.is_featured !== b.source.is_featured) {
+    return Number(b.source.is_featured) - Number(a.source.is_featured);
+  }
+  if (a.source.sort_order !== b.source.sort_order) {
+    return a.source.sort_order - b.source.sort_order;
+  }
+  return a.country.name.localeCompare(b.country.name);
 }
 
 function readRawCountryCode(raw: unknown): string | null {
