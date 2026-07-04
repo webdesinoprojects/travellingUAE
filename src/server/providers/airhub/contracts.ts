@@ -489,6 +489,177 @@ export function decideAirhubPurchaseStart(input: {
   return { kind: "ready" };
 }
 
+/**
+ * Defensive parser for the PurchaseSim response.
+ *
+ * The exact response shape is NOT fully confirmed, so this never throws, tries a
+ * range of candidate key names (and common `data`/`result` envelopes), and
+ * classifies success / failed / unknown. Extraction of activation/sim fields is
+ * best-effort; missing critical ids are handled by decidePurchaseOutcomeStatus.
+ */
+export type AirhubPurchaseParseResult = {
+  classification: "success" | "failed" | "unknown";
+  providerOrderId: string | null;
+  activationCode: string | null;
+  lpaCode: string | null;
+  apn: string | null;
+  simId: string | null;
+  simPin: string | null;
+  qrPayload: string | null;
+  errorCode: string | null;
+};
+
+export function parsePurchaseSimResponse(response: unknown): AirhubPurchaseParseResult {
+  const result: AirhubPurchaseParseResult = {
+    classification: "unknown",
+    providerOrderId: null,
+    activationCode: null,
+    lpaCode: null,
+    apn: null,
+    simId: null,
+    simPin: null,
+    qrPayload: null,
+    errorCode: null,
+  };
+
+  if (!isRecord(response)) {
+    return result;
+  }
+
+  // Some providers wrap the payload in data/result, sometimes as a single-item
+  // array. Search common envelopes first, then the root.
+  const sources = collectPurchasePayloadSources(response);
+
+  result.providerOrderId = firstString(sources, [
+    "orderid",
+    "order_id",
+    "orderId",
+    "orderID",
+    "airhub_order_id",
+    "airhubOrderId",
+    "providerOrderId",
+    "provider_order_id",
+    "providerId",
+    "provider_id",
+  ]);
+  result.activationCode = firstString(sources, [
+    "activation_code",
+    "activationCode",
+    "activationcode",
+    "ActivationCode",
+  ]);
+  result.lpaCode = firstString(sources, ["lpa_code", "lpaCode", "lpa", "LPA"]);
+  result.apn = firstString(sources, ["apn", "APN"]);
+  result.simId = firstString(sources, ["sim_id", "simId", "simID", "simid", "iccid", "ICCID"]);
+  result.simPin = firstString(sources, ["sim_pin", "simPin", "simPIN", "simpin", "pin", "PIN"]);
+  result.qrPayload = firstString(sources, [
+    "qr_payload",
+    "qrPayload",
+    "qrpayload",
+    "qrcode",
+    "qr_code",
+    "qrCode",
+    "qr",
+  ]);
+  result.errorCode = firstString(sources, [
+    "error",
+    "errorCode",
+    "error_code",
+    "errorMessage",
+    "error_message",
+  ]);
+
+  const statusText = (
+    firstString(sources, ["status", "message", "responseMessage", "resultMessage"]) ?? ""
+  ).toLowerCase();
+  const successFlag = firstBoolean(sources, ["success", "isSuccess", "is_success"]);
+  const looksFailed =
+    result.errorCode !== null ||
+    successFlag === false ||
+    /\b(fail|failed|failure|error|declin|invalid|not\s*allowed)\b/.test(statusText);
+  const looksSuccess =
+    successFlag === true ||
+    /\b(success|ok|completed|complete|purchased)\b/.test(statusText) ||
+    result.providerOrderId !== null;
+
+  if (looksFailed) {
+    result.classification = "failed";
+  } else if (looksSuccess) {
+    result.classification = "success";
+  } else {
+    result.classification = "unknown";
+  }
+
+  return result;
+}
+
+function collectPurchasePayloadSources(response: UnknownRecord): UnknownRecord[] {
+  const sources: UnknownRecord[] = [];
+  for (const key of ["data", "result", "order", "orders", "response"]) {
+    const value = response[key];
+    if (isRecord(value)) {
+      sources.push(value);
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isRecord(item)) sources.push(item);
+      }
+    }
+  }
+  sources.push(response);
+  return sources;
+}
+
+/** Map a parsed PurchaseSim result to a safe order status. Never fakes success. */
+export type EsimPurchaseOutcome = {
+  status: "fulfilled" | "pending_review" | "purchase_failed";
+  reason: string;
+};
+
+export function decidePurchaseOutcomeStatus(parse: AirhubPurchaseParseResult): EsimPurchaseOutcome {
+  if (parse.classification === "failed") {
+    return { status: "purchase_failed", reason: parse.errorCode ?? "provider_failed" };
+  }
+
+  if (parse.classification === "success") {
+    if (!parse.providerOrderId) {
+      // "Successful looking" but missing the critical id -> needs a human.
+      return { status: "pending_review", reason: "missing_provider_order_id" };
+    }
+    if (parse.activationCode || parse.qrPayload) {
+      return { status: "fulfilled", reason: "activation_present" };
+    }
+    // Order placed, but activation is fetched later (GetActivationCode phase).
+    return { status: "pending_review", reason: "awaiting_activation" };
+  }
+
+  return { status: "pending_review", reason: "unknown_response" };
+}
+
+function firstString(sources: UnknownRecord[], keys: string[]): string | null {
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = readString(source, key);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+function firstBoolean(sources: UnknownRecord[], keys: string[]): boolean | null {
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "boolean") return value;
+      if (typeof value === "string") {
+        const lowered = value.trim().toLowerCase();
+        if (lowered === "true") return true;
+        if (lowered === "false") return false;
+      }
+    }
+  }
+  return null;
+}
+
 export function buildPublicOrderDto(row: {
   public_reference: string;
   status: string;

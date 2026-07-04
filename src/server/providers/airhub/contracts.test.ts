@@ -18,7 +18,9 @@ import {
   buildPurchaseSimRequest,
   decideAirhubPlanFetch,
   decideAirhubPurchaseStart,
+  decidePurchaseOutcomeStatus,
   isValidAirhubPlanInformationResponse,
+  parsePurchaseSimResponse,
   normalizeAirhubCountryCode,
   parseCountryRegionResponse,
   parseLoginToken,
@@ -612,4 +614,186 @@ test("public plan DTO strips raw provider payload", () => {
   assert.equal("raw" in dto, false);
   assert.equal("token" in dto, false);
   assert.equal(dto.planCode, AIRHUB_DEFAULT_TEST_PLAN_CODE);
+});
+
+// ---- Phase 3A: PurchaseSim (guarded, test-plan-only) ----------------------
+
+test("PurchaseSim endpoint keeps the exact Airhub spelling", () => {
+  assert.equal(AIRHUB_ENDPOINTS.purchaseSim, "/api/ESIM/PurhaseSim");
+});
+
+test("default test plan code is 2116296", () => {
+  assert.equal(AIRHUB_DEFAULT_TEST_PLAN_CODE, "2116296");
+});
+
+test("buildPurchaseSimRequest uses unique_order_id (UK test plan 2116296)", () => {
+  const body = buildPurchaseSimRequest({
+    partnerCode: 89508211,
+    planCode: "2116296",
+    uniqueOrderId: "uoid-123",
+    travelDate: "2026-08-01",
+  });
+  assert.deepEqual(body, {
+    partnerCode: 89508211,
+    planCode: "2116296",
+    unique_order_id: "uoid-123",
+    travelDate: "2026-08-01",
+  });
+
+  // travelDate is omitted when absent (never invented).
+  const noDate = buildPurchaseSimRequest({
+    partnerCode: 89508211,
+    planCode: "2116296",
+    uniqueOrderId: "uoid-123",
+  });
+  assert.equal("travelDate" in noDate, false);
+  assert.equal(noDate.unique_order_id, "uoid-123");
+});
+
+test("decideAirhubPurchaseStart: disabled flag prevents any provider call", () => {
+  const decision = decideAirhubPurchaseStart({
+    purchaseEnabled: false,
+    testPurchaseOnly: true,
+    allowNonTestPlanPurchase: false,
+    testPlanCode: "2116296",
+    planCode: "2116296",
+    status: "paid",
+    hasActivationCode: false,
+  });
+  assert.equal(decision.kind, "disabled");
+});
+
+test("decideAirhubPurchaseStart: test-only guard blocks non-test plan", () => {
+  const decision = decideAirhubPurchaseStart({
+    purchaseEnabled: true,
+    testPurchaseOnly: true,
+    allowNonTestPlanPurchase: false,
+    testPlanCode: "2116296",
+    planCode: "9999999",
+    status: "paid",
+    hasActivationCode: false,
+  });
+  assert.equal(decision.kind, "blocked_plan");
+});
+
+test("decideAirhubPurchaseStart: allows the test plan when enabled", () => {
+  const decision = decideAirhubPurchaseStart({
+    purchaseEnabled: true,
+    testPurchaseOnly: true,
+    allowNonTestPlanPurchase: false,
+    testPlanCode: "2116296",
+    planCode: "2116296",
+    status: "paid",
+    hasActivationCode: false,
+  });
+  assert.equal(decision.kind, "ready");
+});
+
+test("decideAirhubPurchaseStart: skips already fulfilled / started orders", () => {
+  assert.equal(
+    decideAirhubPurchaseStart({
+      purchaseEnabled: true,
+      testPurchaseOnly: true,
+      allowNonTestPlanPurchase: false,
+      testPlanCode: "2116296",
+      planCode: "2116296",
+      status: "paid",
+      hasActivationCode: true,
+    }).kind,
+    "skip_existing",
+  );
+  assert.equal(
+    decideAirhubPurchaseStart({
+      purchaseEnabled: true,
+      testPurchaseOnly: true,
+      allowNonTestPlanPurchase: false,
+      testPlanCode: "2116296",
+      planCode: "2116296",
+      status: "purchase_started",
+      hasActivationCode: false,
+    }).kind,
+    "skip_existing",
+  );
+});
+
+test("parsePurchaseSimResponse extracts a provider order id defensively", () => {
+  const parsed = parsePurchaseSimResponse({ status: "success", data: { orderid: "12713137" } });
+  assert.equal(parsed.classification, "success");
+  assert.equal(parsed.providerOrderId, "12713137");
+});
+
+test("parsePurchaseSimResponse extracts activation and SIM fields defensively", () => {
+  const parsed = parsePurchaseSimResponse({
+    success: true,
+    data: [
+      {
+        orderId: "12713137",
+        activationCode: "ACT-123",
+        LPA: "LPA:1$smdp$match",
+        APN: "internet",
+        simID: "SIM-123",
+        simPIN: "0000",
+        qrPayload: "QR-PAYLOAD",
+      },
+    ],
+  });
+
+  assert.equal(parsed.classification, "success");
+  assert.equal(parsed.providerOrderId, "12713137");
+  assert.equal(parsed.activationCode, "ACT-123");
+  assert.equal(parsed.lpaCode, "LPA:1$smdp$match");
+  assert.equal(parsed.apn, "internet");
+  assert.equal(parsed.simId, "SIM-123");
+  assert.equal(parsed.simPin, "0000");
+  assert.equal(parsed.qrPayload, "QR-PAYLOAD");
+});
+
+test("parsePurchaseSimResponse classifies explicit failure without an order id", () => {
+  const parsed = parsePurchaseSimResponse({ success: false, error: "insufficient_balance" });
+  assert.equal(parsed.classification, "failed");
+  assert.equal(parsed.errorCode, "insufficient_balance");
+  assert.equal(parsed.providerOrderId, null);
+});
+
+test("parsePurchaseSimResponse classifies explicit failure even with an order id", () => {
+  const parsed = parsePurchaseSimResponse({
+    success: false,
+    data: { orderid: "12713137", error: "insufficient_balance" },
+  });
+  assert.equal(parsed.classification, "failed");
+  assert.equal(parsed.providerOrderId, "12713137");
+  assert.equal(decidePurchaseOutcomeStatus(parsed).status, "purchase_failed");
+});
+
+test("parsePurchaseSimResponse never throws on unknown shapes", () => {
+  assert.equal(parsePurchaseSimResponse(null).classification, "unknown");
+  assert.equal(parsePurchaseSimResponse("nope").classification, "unknown");
+  assert.equal(parsePurchaseSimResponse({}).classification, "unknown");
+});
+
+test("decidePurchaseOutcomeStatus never fakes fulfilled", () => {
+  // failed -> purchase_failed
+  assert.equal(
+    decidePurchaseOutcomeStatus(parsePurchaseSimResponse({ error: "declined" })).status,
+    "purchase_failed",
+  );
+  // success + order id but no activation -> pending_review (awaiting activation)
+  assert.deepEqual(
+    decidePurchaseOutcomeStatus(parsePurchaseSimResponse({ status: "success", orderid: "111" })),
+    { status: "pending_review", reason: "awaiting_activation" },
+  );
+  // success + order id + activation -> fulfilled
+  assert.equal(
+    decidePurchaseOutcomeStatus(
+      parsePurchaseSimResponse({ status: "success", orderid: "111", activation_code: "LPA:1$x$y" }),
+    ).status,
+    "fulfilled",
+  );
+  // success-looking but missing order id -> pending_review
+  assert.deepEqual(
+    decidePurchaseOutcomeStatus(parsePurchaseSimResponse({ success: true })),
+    { status: "pending_review", reason: "missing_provider_order_id" },
+  );
+  // unknown -> pending_review
+  assert.equal(decidePurchaseOutcomeStatus(parsePurchaseSimResponse({})).status, "pending_review");
 });

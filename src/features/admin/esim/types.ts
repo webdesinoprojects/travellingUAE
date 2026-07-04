@@ -114,3 +114,17 @@ export type EsimOrderStats = {
   fulfilled: number;
   purchaseFailed: number;
 };
+
+/**
+ * PurchaseSim guard summary for the admin order detail. Booleans + labels only —
+ * no secrets. Drives whether the manual "Run Airhub test fulfillment" action is
+ * available and explains why it is blocked.
+ */
+export type EsimFulfillmentGuardView = {
+  purchaseEnabled: boolean;
+  testPurchaseOnly: boolean;
+  testPlanCode: string;
+  isTestPlan: boolean;
+  canRunTestFulfillment: boolean;
+  blockedReason: string | null;
+};

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAdminPageAccess } from "@/server/admin/access";
 import { hasSupabaseAdminEnv } from "@/server/supabase/client";
 import { getEsimOrderById } from "@/server/admin/esim-orders";
+import { getEsimFulfillmentGuardView } from "@/server/providers/airhub/orders";
 import { EsimOrderActions } from "@/features/admin/esim/components/EsimOrderActions";
 import { EsimOrderDetailSections } from "@/features/admin/esim/components/EsimOrderDetailSections";
 
@@ -38,6 +39,12 @@ export default async function AdminEsimOrderDetailPage({
   if (!order) {
     notFound();
   }
+  const fulfillmentGuard = getEsimFulfillmentGuardView({
+    status: order.status,
+    planCode: order.planCode,
+    hasActivationCode:
+      order.fulfillment.hasActivationCode || order.fulfillment.hasQrPayload,
+  });
 
   return (
     <div className="grid gap-5">
@@ -51,8 +58,11 @@ export default async function AdminEsimOrderDetailPage({
           </h1>
         </div>
         <EsimOrderActions
+          orderId={order.id}
+          status={order.status}
           publicReference={order.publicReference}
           stripeCheckoutSessionId={order.stripeCheckoutSessionId}
+          fulfillmentGuard={fulfillmentGuard}
         />
       </div>
 
