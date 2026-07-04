@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AIRHUB_DEFAULT_TEST_PLAN_CODE,
   AIRHUB_ENDPOINTS,
+  buildActivationCodeRequest,
   buildAirhubCountrySyncPayload,
   buildAirhubCountrySyncPayloadFromItems,
   buildAirhubCountryUpsertRows,
@@ -59,36 +61,34 @@ test("bearer headers inject Authorization without exposing credentials", () => {
   });
 });
 
-test("GetPlanInformation request uses partnerCode, flag, countryCode, and multiplecountrycode", () => {
-  assert.deepEqual(
-    buildPlanInformationRequest({
-      partnerCode: 89508211,
-      flag: 5,
-      countryCode: "us",
-    }),
-    {
-      partnerCode: 89508211,
-      flag: 5,
-      countryCode: "us",
-      multiplecountrycode: ["us"],
-    },
-  );
+test("GetPlanInformation flag 5 body includes live-required multiplecountrycode", () => {
+  const body = buildPlanInformationRequest({
+    partnerCode: 89508211,
+    flag: 5,
+    countryCode: "USA",
+  });
+
+  assert.deepEqual(body, {
+    partnerCode: 89508211,
+    flag: 5,
+    countryCode: "USA",
+    multiplecountrycode: ["USA"],
+  });
 });
 
-test("Airhub plan requests send lowercase countryCode array while route state normalizes uppercase", () => {
+test("Airhub plan country resolver keeps IN, maps UK to UK, and maps US to USA", () => {
   assert.equal(normalizeAirhubCountryCode("in"), "IN");
-  assert.deepEqual(
-    buildPlanInformationRequest({
-      partnerCode: 89508211,
-      flag: 5,
-      countryCode: buildAirhubPlanRequestCountryCode("IN"),
+  assert.equal(buildAirhubPlanRequestCountryCode({ countryCode: "IN" }), "IN");
+  assert.equal(buildAirhubPlanRequestCountryCode({ countryCode: "UK" }), "UK");
+  assert.equal(buildAirhubPlanRequestCountryCode({ countryCode: "GB" }), "UK");
+  assert.equal(buildAirhubPlanRequestCountryCode({ countryCode: "US" }), "USA");
+  assert.equal(
+    buildAirhubPlanRequestCountryCode({
+      countryCode: "DE",
+      airhubCode: "DEU",
+      countryName: "Germany",
     }),
-    {
-      partnerCode: 89508211,
-      flag: 5,
-      countryCode: "in",
-      multiplecountrycode: ["in"],
-    },
+    "DEU",
   );
 });
 
@@ -243,6 +243,24 @@ test("lower and upper case country codes normalize to uppercase", () => {
   assert.equal(payload.duplicatesDropped, 1);
 });
 
+test("Airhub USA country code is stored as public US with provider code USA", () => {
+  const payload = buildAirhubCountrySyncPayload(
+    {
+      countryregiondetail: [{ name: "United States", code: "USA" }],
+    },
+    "2026-07-02T00:00:00.000Z",
+  );
+
+  assert.deepEqual(payload.rows[0], {
+    iso_code: "US",
+    name: "United States",
+    airhub_code: "USA",
+    flag_url: null,
+    raw: { name: "United States", code: "USA" },
+    synced_at: "2026-07-02T00:00:00.000Z",
+  });
+});
+
 test("missing country code or name rows are skipped", () => {
   const payload = buildAirhubCountrySyncPayload(
     {
@@ -291,17 +309,34 @@ test("PurchaseSim request sends unique_order_id", () => {
   assert.deepEqual(
     buildPurchaseSimRequest({
       partnerCode: 89508211,
-      planCode: "22237541",
+      planCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       travelDate: "2026-07-05",
       uniqueOrderId: "airhub_unique_1",
     }),
     {
       partnerCode: 89508211,
-      planCode: "22237541",
+      planCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       travelDate: "2026-07-05",
       unique_order_id: "airhub_unique_1",
     },
   );
+});
+
+test("GetActivationCode request uses Airhub orderid array shape", () => {
+  assert.deepEqual(
+    buildActivationCodeRequest({
+      partnerCode: 89508211,
+      orderIds: ["12713137", " 12711895 ", ""],
+    }),
+    {
+      partnerCode: 89508211,
+      orderid: ["12713137", "12711895"],
+    },
+  );
+});
+
+test("default Airhub test plan code is the confirmed UK 1 MB plan", () => {
+  assert.equal(AIRHUB_DEFAULT_TEST_PLAN_CODE, "2116296");
 });
 
 test("plan fetch is disabled when AIRHUB_ENABLED is false and cache is empty", () => {
@@ -441,6 +476,8 @@ test("invalid Airhub plan shape is not valid and does not throw while parsing", 
 test("plan and country endpoints are separate from PurchaseSim", () => {
   assert.equal(AIRHUB_ENDPOINTS.countryRegionDetail, "/api/ESIM/Getcountry_regiondetail");
   assert.equal(AIRHUB_ENDPOINTS.planInformation, "/api/ESIM/GetPlanInformation");
+  assert.equal(AIRHUB_ENDPOINTS.purchaseSim, "/api/ESIM/PurhaseSim");
+  assert.equal(AIRHUB_ENDPOINTS.activationCode, "/api/ESIM/GetActivationCode");
   assert.notEqual(AIRHUB_ENDPOINTS.planInformation, AIRHUB_ENDPOINTS.purchaseSim);
   assert.notEqual(AIRHUB_ENDPOINTS.countryRegionDetail, AIRHUB_ENDPOINTS.purchaseSim);
 });
@@ -451,8 +488,8 @@ test("purchase is disabled unless explicitly enabled", () => {
       purchaseEnabled: false,
       testPurchaseOnly: true,
       allowNonTestPlanPurchase: false,
-      testPlanCode: "22237541",
-      planCode: "22237541",
+      testPlanCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
+      planCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       status: "paid",
       hasActivationCode: false,
     }),
@@ -466,7 +503,7 @@ test("default test allowlist only permits the Airhub test plan", () => {
       purchaseEnabled: true,
       testPurchaseOnly: true,
       allowNonTestPlanPurchase: false,
-      testPlanCode: "22237541",
+      testPlanCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       planCode: "999999",
       status: "paid",
       hasActivationCode: false,
@@ -479,8 +516,8 @@ test("default test allowlist only permits the Airhub test plan", () => {
       purchaseEnabled: true,
       testPurchaseOnly: true,
       allowNonTestPlanPurchase: false,
-      testPlanCode: "22237541",
-      planCode: "22237541",
+      testPlanCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
+      planCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       status: "paid",
       hasActivationCode: false,
     }),
@@ -501,13 +538,13 @@ test("Stripe metadata is isolated to eSIM charge type", () => {
   assert.deepEqual(
     buildEsimStripeMetadata({
       orderId: "order-id",
-      planCode: "22237541",
+      planCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       countryCode: "GB",
     }),
     {
       charge_type: "esim_airhub",
       internal_order_id: "order-id",
-      plan_code: "22237541",
+      plan_code: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       country_code: "GB",
     },
   );
@@ -519,8 +556,8 @@ test("duplicate purchase-start decision skips already started rows", () => {
       purchaseEnabled: true,
       testPurchaseOnly: true,
       allowNonTestPlanPurchase: false,
-      testPlanCode: "22237541",
-      planCode: "22237541",
+      testPlanCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
+      planCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       status: "purchase_started",
       hasActivationCode: false,
     }),
@@ -534,7 +571,7 @@ test("public order DTO maps activation payload only after valid lookup", () => {
       public_reference: "ESIM-1",
       status: "fulfilled",
       guest_email: "user@example.com",
-      plan_code: "22237541",
+      plan_code: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       plan_name: "UK 1 MB Plan",
       country_code: "GB",
       country_name: "United Kingdom",
@@ -562,7 +599,7 @@ test("public plan DTO strips raw provider payload", () => {
   const [plan] = parsePlanInformationResponse({
     data: [
       {
-        planCode: "22237541",
+        planCode: AIRHUB_DEFAULT_TEST_PLAN_CODE,
         planName: "UK 1 MB Plan",
         price: 1,
         currency: "USD",
@@ -574,5 +611,5 @@ test("public plan DTO strips raw provider payload", () => {
 
   assert.equal("raw" in dto, false);
   assert.equal("token" in dto, false);
-  assert.equal(dto.planCode, "22237541");
+  assert.equal(dto.planCode, AIRHUB_DEFAULT_TEST_PLAN_CODE);
 });

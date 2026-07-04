@@ -8,6 +8,7 @@ import {
   type AirhubCountrySyncPayload,
   type AirhubCountryRegionItem,
   type AirhubPublicCountry,
+  buildAirhubPlanRequestCountryCode,
   buildAirhubCountrySyncPayload,
   normalizeAirhubCountryCode,
   parseCountryRegionResponse,
@@ -25,6 +26,12 @@ type CountryRow = {
   flag_url: string | null;
   global_flag_url: string | null;
   display_name_override: string | null;
+};
+
+type PlanLookupCountryRow = {
+  airhub_code: string | null;
+  name: string | null;
+  raw: unknown;
 };
 
 let countryCache:
@@ -58,20 +65,73 @@ export async function getLocalAirhubCountryByCode(
   }
 
   const supabase = getSupabaseAdminClient();
+  const columns =
+    "iso_code,name,region_name,flag_url,global_flag_url,display_name_override";
+  let query = supabase
+    .from("airhub_countries")
+    .select(columns)
+    // Hidden countries are treated as not found for the public flow.
+    .eq("is_visible", true);
+
+  query =
+    normalizedCountryCode === "UK"
+      ? query.in("iso_code", ["UK", "GB"])
+      : query.eq("iso_code", normalizedCountryCode);
+
+  const { data, error } = await query.limit(2);
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = (data ?? []) as CountryRow[];
+  const row =
+    rows.find((item) => item.iso_code === normalizedCountryCode) ?? rows[0] ?? null;
+  if (!row) return null;
+
+  const country = toPublicCountry(row);
+  return normalizedCountryCode === "UK" && row.iso_code === "GB"
+    ? { ...country, isoCode: "UK", name: "United Kingdom" }
+    : country;
+}
+
+export async function resolveAirhubPlanLookupCountryCode(
+  countryCode: string,
+): Promise<string> {
+  const normalizedCountryCode = normalizeAirhubCountryCode(countryCode);
+
+  if (!normalizedCountryCode) {
+    throw new Error("Invalid country code");
+  }
+
+  const confirmed = buildAirhubPlanRequestCountryCode({
+    countryCode: normalizedCountryCode,
+  });
+  if (confirmed !== normalizedCountryCode) {
+    return confirmed;
+  }
+
+  if (!hasSupabaseAdminEnv()) {
+    return confirmed;
+  }
+
+  const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("airhub_countries")
-    .select("iso_code,name,region_name,flag_url,global_flag_url,display_name_override")
+    .select("airhub_code,name,raw")
     .eq("iso_code", normalizedCountryCode)
-    // Hidden countries are treated as not found for the public flow.
-    .eq("is_visible", true)
     .maybeSingle();
 
   if (error) {
     throw error;
   }
 
-  const row = data as CountryRow | null;
-  return row ? toPublicCountry(row) : null;
+  const row = data as PlanLookupCountryRow | null;
+  return buildAirhubPlanRequestCountryCode({
+    countryCode: normalizedCountryCode,
+    airhubCode: row?.airhub_code ?? readRawCountryCode(row?.raw),
+    countryName: row?.name ?? null,
+  });
 }
 
 export async function fetchAirhubCountryRegionDetail(
@@ -190,4 +250,15 @@ function toPublicCountry(row: CountryRow): AirhubPublicCountry {
     flagUrl: row.flag_url,
     globalFlagUrl: row.global_flag_url,
   };
+}
+
+function readRawCountryCode(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const value = (raw as Record<string, unknown>).code;
+  if (value == null || value === "") return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
 }

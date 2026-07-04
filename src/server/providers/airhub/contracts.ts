@@ -2,6 +2,7 @@ export const AIRHUB_ENDPOINTS = {
   login: "/api/Authentication/UserLogin",
   planInformation: "/api/ESIM/GetPlanInformation",
   purchaseSim: "/api/ESIM/PurhaseSim",
+  activationCode: "/api/ESIM/GetActivationCode",
   wallet: "/api/ESIM/GetWallet",
   individualWallet: "/api/ESIM/get_wallet_invidual",
   orderDetail: "/api/ESIM/GetOrderDetail",
@@ -10,6 +11,8 @@ export const AIRHUB_ENDPOINTS = {
   renewInsert: "/api/Renew/InsertRenew",
   renewData: "/api/Renew/GetRenewData",
 } as const;
+
+export const AIRHUB_DEFAULT_TEST_PLAN_CODE = "2116296";
 
 export type UnknownRecord = Record<string, unknown>;
 
@@ -30,6 +33,11 @@ export type AirhubPurchaseSimRequest = {
   planCode: string;
   travelDate?: string;
   unique_order_id: string;
+};
+
+export type AirhubActivationCodeRequest = {
+  partnerCode: number;
+  orderid: string[];
 };
 
 export type AirhubCountryRegionItem = {
@@ -172,8 +180,6 @@ export function buildPlanInformationRequest(input: {
 
   if (input.countryCode) {
     body.countryCode = input.countryCode;
-    // Airhub's current GetPlanInformation validation requires this array even
-    // when countryCode is present. Keep both fields to satisfy docs + provider.
     body.multiplecountrycode = [input.countryCode];
   }
 
@@ -197,6 +203,16 @@ export function buildPurchaseSimRequest(input: {
   }
 
   return body;
+}
+
+export function buildActivationCodeRequest(input: {
+  partnerCode: number;
+  orderIds: string[];
+}): AirhubActivationCodeRequest {
+  return {
+    partnerCode: input.partnerCode,
+    orderid: input.orderIds.map((orderId) => orderId.trim()).filter(Boolean),
+  };
 }
 
 export function buildCountryRegionUrl(baseUrl: string, flag: 1 | 2): string {
@@ -259,9 +275,10 @@ export function buildAirhubCountrySyncPayloadFromItems(
 
   for (const country of countries) {
     const isoCode = normalizeCountryCode(country.code);
+    const airhubCode = normalizeProviderCountryIdentifier(country.code);
     const name = normalizeRequiredString(country.name);
 
-    if (!isoCode || !name) {
+    if (!isoCode || !airhubCode || !name) {
       continue;
     }
 
@@ -269,7 +286,7 @@ export function buildAirhubCountrySyncPayloadFromItems(
     const row: AirhubCountryUpsertRow = {
       iso_code: isoCode,
       name,
-      airhub_code: isoCode,
+      airhub_code: airhubCode,
       flag_url: normalizeOptionalString(country.flag),
       raw: country.raw,
       synced_at: syncedAt,
@@ -356,11 +373,40 @@ export function normalizeAirhubCountryCode(value: string): string | null {
   return /^[A-Z]{2}$/.test(normalized) ? normalized : null;
 }
 
-export function buildAirhubPlanRequestCountryCode(countryCode: string): string {
-  // Airhub's PDF example sends countryCode as lowercase ("us"), while the
-  // country sync endpoint returns uppercase ISO codes. Keep DB/page state
-  // uppercase, but send lowercase to GetPlanInformation.
-  return countryCode.trim().toLowerCase();
+export function buildAirhubPlanRequestCountryCode(input: {
+  countryCode: string;
+  airhubCode?: string | null;
+  countryName?: string | null;
+}): string {
+  const routeCountryCode = input.countryCode.trim().toUpperCase();
+  const confirmed = resolveConfirmedAirhubCountryCode(routeCountryCode);
+  if (confirmed) {
+    return confirmed;
+  }
+
+  const providerCode = normalizeProviderCountryIdentifier(input.airhubCode);
+  if (providerCode) {
+    return providerCode;
+  }
+
+  const providerName = normalizeProviderCountryIdentifier(input.countryName);
+  if (providerName && /^[A-Z]{2,3}$/.test(providerName)) {
+    return providerName;
+  }
+
+  return routeCountryCode || input.countryCode.trim();
+}
+
+function resolveConfirmedAirhubCountryCode(countryCode: string): string | null {
+  if (countryCode === "UK" || countryCode === "GB") return "UK";
+  if (countryCode === "US") return "USA";
+  return null;
+}
+
+function normalizeProviderCountryIdentifier(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return /^[a-z]{2,3}$/i.test(trimmed) ? trimmed.toUpperCase() : trimmed;
 }
 
 export function decideAirhubPlanFetch(input: {
@@ -550,8 +596,11 @@ function readCountryRegionRecords(response: unknown): UnknownRecord[] {
 }
 
 function normalizeCountryCode(value: string | null | undefined): string | null {
-  const normalized = normalizeRequiredString(value)?.toUpperCase();
-  return normalized || null;
+  const normalized = normalizeProviderCountryIdentifier(value);
+  if (!normalized) return null;
+  if (normalized === "USA") return "US";
+  if (normalized === "GB") return "UK";
+  return normalized;
 }
 
 function normalizeRequiredString(value: string | null | undefined): string | null {

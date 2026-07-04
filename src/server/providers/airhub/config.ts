@@ -1,5 +1,6 @@
 import "server-only";
 
+import { AIRHUB_DEFAULT_TEST_PLAN_CODE } from "./contracts";
 import { AirhubError } from "./errors";
 
 export type AirhubConfig = {
@@ -24,7 +25,7 @@ export function getAirhubConfig(): AirhubConfig {
     username: readOptionalEnv("AIRHUB_USERNAME"),
     password: readOptionalEnv("AIRHUB_PASSWORD"),
     partnerCode: readIntegerEnv("AIRHUB_PARTNER_CODE", 89508211),
-    testPlanCode: process.env.AIRHUB_TEST_PLAN_CODE?.trim() || "22237541",
+    testPlanCode: process.env.AIRHUB_TEST_PLAN_CODE?.trim() || AIRHUB_DEFAULT_TEST_PLAN_CODE,
     planCacheTtlSeconds: readIntegerEnv("AIRHUB_PLAN_CACHE_TTL_SECONDS", 1800),
     tokenTtlSeconds: readIntegerEnv("AIRHUB_TOKEN_TTL_SECONDS", 900),
     testPurchaseOnly: readBooleanEnv("AIRHUB_TEST_PURCHASE_ONLY", true),

@@ -9,7 +9,6 @@ import { getAirhubConfig } from "./config";
 import {
   AIRHUB_ENDPOINTS,
   type AirhubPublicPlan,
-  buildAirhubPlanRequestCountryCode,
   decideAirhubPlanFetch,
   buildPlanInformationRequest,
   buildPublicPlanDto,
@@ -17,6 +16,7 @@ import {
   normalizeAirhubCountryCode,
   parsePlanInformationResponse,
 } from "./contracts";
+import { resolveAirhubPlanLookupCountryCode } from "./countries";
 import { AIRHUB_PLAN_FETCH_UNAVAILABLE_MESSAGE, AirhubError } from "./errors";
 
 export type AirhubPlanListing = {
@@ -34,11 +34,14 @@ export async function getAirhubPlansForCountry(
   countryCode: string,
 ): Promise<AirhubPlanListing> {
   const normalizedCountryCode = normalizeCountryCode(countryCode);
+  const planLookupCountryCode = await resolveAirhubPlanLookupCountryCode(
+    normalizedCountryCode,
+  );
   const config = getAirhubConfig();
   const requestHash = buildPlanRequestHash({
     partnerCode: config.partnerCode,
     flag: 5,
-    countryCode: normalizedCountryCode,
+    countryCode: planLookupCountryCode,
   });
 
   const cached = await readPlanCache(requestHash);
@@ -68,7 +71,7 @@ export async function getAirhubPlansForCountry(
   const body = buildPlanInformationRequest({
     partnerCode: config.partnerCode,
     flag: 5,
-    countryCode: buildAirhubPlanRequestCountryCode(normalizedCountryCode),
+    countryCode: planLookupCountryCode,
   });
   const response = await airhubJsonRequest<unknown>(AIRHUB_ENDPOINTS.planInformation, {
     method: "POST",
