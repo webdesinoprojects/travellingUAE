@@ -128,6 +128,7 @@ export type AirhubPublicOrder = {
   publicReference: string;
   status: string;
   guestEmail: string;
+  providerOrderId: string | null;
   planCode: string;
   planName: string | null;
   countryCode: string | null;
@@ -668,6 +669,7 @@ export function buildPublicOrderDto(row: {
   public_reference: string;
   status: string;
   guest_email: string;
+  provider_order_id: string | null;
   plan_code: string;
   plan_name: string | null;
   country_code: string | null;
@@ -685,6 +687,7 @@ export function buildPublicOrderDto(row: {
     publicReference: row.public_reference,
     status: row.status,
     guestEmail: row.guest_email,
+    providerOrderId: row.provider_order_id,
     planCode: row.plan_code,
     planName: row.plan_name,
     countryCode: row.country_code,

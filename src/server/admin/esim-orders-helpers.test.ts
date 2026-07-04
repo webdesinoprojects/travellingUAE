@@ -127,6 +127,7 @@ test("toEsimOrderDetail exposes sensitive fields as booleans only — never raw"
     "ACT-SUPER-SECRET",
     "LPA:1$smdp$secret",
     "QR-SECRET-PAYLOAD",
+    "internet",
     "SIM-SECRET",
     "9999",
   ]) {

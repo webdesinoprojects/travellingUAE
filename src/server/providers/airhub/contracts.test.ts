@@ -609,6 +609,7 @@ test("public order DTO maps activation payload only after valid lookup", () => {
       public_reference: "ESIM-1",
       status: "fulfilled",
       guest_email: "user@example.com",
+      provider_order_id: "12713137",
       plan_code: AIRHUB_DEFAULT_TEST_PLAN_CODE,
       plan_name: "UK 1 MB Plan",
       country_code: "GB",

@@ -458,6 +458,7 @@ function normalizePublicOrderRow(row: EsimOrderRow) {
     public_reference: row.public_reference,
     status: row.status,
     guest_email: row.guest_email,
+    provider_order_id: row.provider_order_id,
     plan_code: row.plan_code,
     plan_name: row.plan_name,
     country_code: row.country_code,
