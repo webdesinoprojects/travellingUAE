@@ -3,6 +3,7 @@ import "server-only";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { getStripe, hasStripeEnv, toStripeAmount } from "@/server/payments/stripe";
+import type { EsimAppliedPricing } from "@/server/esim/pricing-helpers";
 import { getSupabaseAdminClient, hasSupabaseAdminEnv } from "@/server/supabase/client";
 
 import { getAirhubConfig } from "./config";
@@ -38,6 +39,10 @@ type EsimOrderRow = {
   country_name: string | null;
   price: number | string | null;
   currency: string | null;
+  supplier_price: number | string | null;
+  supplier_currency: string | null;
+  markup_amount: number | string | null;
+  pricing_rule_id: string | null;
   travel_date: string | null;
   activation_code: string | null;
   apn: string | null;
@@ -63,10 +68,14 @@ export async function createEsimOrderFromPlan(input: {
   guestEmail: string;
   guestPhone?: string | null;
   travelDate?: string | null;
+  pricing?: EsimAppliedPricing | null;
 }): Promise<CreatedEsimOrder> {
   assertSupabaseReady();
 
-  if (!input.plan.price || input.plan.price <= 0 || !input.plan.currency) {
+  const finalPrice = input.pricing?.finalPrice ?? input.plan.price;
+  const finalCurrency = input.pricing?.finalCurrency ?? input.plan.currency;
+
+  if (!finalPrice || finalPrice <= 0 || !finalCurrency) {
     throw new AirhubError(
       "stripe_payment_required",
       "This eSIM plan is not available for checkout.",
@@ -96,8 +105,12 @@ export async function createEsimOrderFromPlan(input: {
     plan_name: input.plan.planName,
     country_code: input.countryCode.toUpperCase(),
     country_name: input.plan.countryName,
-    price: input.plan.price,
-    currency: input.plan.currency.toUpperCase(),
+    price: finalPrice,
+    currency: finalCurrency.toUpperCase(),
+    supplier_price: input.pricing?.supplierPrice ?? input.plan.price,
+    supplier_currency: input.pricing?.supplierCurrency ?? input.plan.currency?.toUpperCase() ?? null,
+    markup_amount: input.pricing?.markupAmount ?? 0,
+    pricing_rule_id: input.pricing?.pricingRuleId ?? null,
     travel_date: input.travelDate ?? null,
     status: "payment_pending",
     expires_at: expiresAt,

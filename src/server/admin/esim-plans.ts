@@ -2,6 +2,8 @@ import "server-only";
 
 import { getSupabaseAdminClient } from "@/server/supabase/client";
 import { readPlanControls, upsertPlanControl } from "@/server/esim/plan-controls";
+import { applyPricingToPlan } from "@/server/esim/pricing-helpers";
+import { readActivePricingRules } from "@/server/esim/pricing-rules";
 import {
   computePlanPageCount,
   filterAdminPlans,
@@ -43,14 +45,37 @@ export async function listAdminPlans(query: AdminPlanQuery): Promise<AdminPlanLi
   }
 
   const flat = flattenCachePlans((data ?? []) as PlanCacheRow[]);
-  const controls = await readPlanControls();
+  const [controls, pricingRules] = await Promise.all([
+    readPlanControls(),
+    readActivePricingRules(),
+  ]);
   const merged = mergePlanControlsForAdmin(flat, controls);
+  const priced = merged.map((plan) => {
+    const pricedPlan = applyPricingToPlan({
+      plan: {
+        planCode: plan.planCode,
+        price: plan.price,
+        currency: plan.currency,
+      },
+      countryCode: plan.countryCode,
+      rules: pricingRules,
+    });
 
-  const countries = Array.from(new Set(merged.map((item) => item.countryCode)))
+    return {
+      ...plan,
+      supplierPrice: pricedPlan.pricing.supplierPrice,
+      finalPrice: pricedPlan.pricing.finalPrice,
+      markupAmount: pricedPlan.pricing.markupAmount,
+      pricingSource: pricedPlan.pricing.pricingSource,
+      pricingRuleId: pricedPlan.pricing.pricingRuleId,
+    };
+  });
+
+  const countries = Array.from(new Set(priced.map((item) => item.countryCode)))
     .filter(Boolean)
     .sort();
 
-  const filtered = sortAdminPlans(filterAdminPlans(merged, query));
+  const filtered = sortAdminPlans(filterAdminPlans(priced, query));
   const total = filtered.length;
 
   return {

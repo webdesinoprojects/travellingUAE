@@ -7,6 +7,7 @@ const TABS = [
   { label: "Orders", href: "/admin/esim/orders" },
   { label: "Countries", href: "/admin/esim/countries" },
   { label: "Plans", href: "/admin/esim/plans" },
+  { label: "Pricing", href: "/admin/esim/pricing" },
 ];
 
 export function EsimAdminTabs() {

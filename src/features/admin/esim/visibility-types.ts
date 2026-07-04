@@ -48,6 +48,11 @@ export type AdminPlanItem = {
   countryCode: string;
   planCode: string;
   planName: string | null;
+  supplierPrice: number | null;
+  finalPrice: number | null;
+  markupAmount: number | null;
+  pricingSource: "plan" | "country" | "global" | "none";
+  pricingRuleId: string | null;
   price: number | null;
   currency: string | null;
   isVisible: boolean;

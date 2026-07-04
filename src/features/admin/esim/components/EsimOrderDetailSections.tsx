@@ -53,9 +53,12 @@ export function EsimOrderDetailSections({ order }: { order: EsimOrderDetail }) {
 
       <Card title="Payment">
         <FieldGrid>
-          <Field label="Price" value={formatEsimMoney(order.price, order.currency)} />
+          <Field label="Customer price" value={formatEsimMoney(order.price, order.currency)} />
+          <Field label="Supplier price" value={formatEsimMoney(order.supplierPrice, order.supplierCurrency)} />
+          <Field label="Estimated profit" value={formatEsimMoney(order.markupAmount, order.currency)} />
           <Field label="Paid amount" value={formatEsimMoney(order.paidAmount, order.paidCurrency)} />
           <Field label="Paid at" value={formatEsimDateTime(order.paidAt)} />
+          <Field label="Pricing rule" value={formatEsimText(order.pricingRuleId)} breakAll />
           <Field label="Stripe session" value={formatEsimText(order.stripeCheckoutSessionId)} breakAll />
           <Field label="Payment intent" value={formatEsimText(order.stripePaymentIntentId)} breakAll />
           <Field label="Completed event" value={formatEsimText(order.stripeCompletedEventId)} breakAll />

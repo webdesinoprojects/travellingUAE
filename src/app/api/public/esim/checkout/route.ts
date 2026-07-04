@@ -6,7 +6,7 @@ import {
   createEsimOrderFromPlan,
   createEsimStripeSession,
 } from "@/server/providers/airhub/orders";
-import { getVisibleAirhubPlansForCountry } from "@/server/esim/public-plans";
+import { getVisiblePricedAirhubPlansForCountry } from "@/server/esim/public-plans";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
 
     // Visible-plan listing already excludes admin-hidden plans, so a hidden plan
     // is not found here and cannot be ordered.
-    const listing = await getVisibleAirhubPlansForCountry(countryCode);
+    const listing = await getVisiblePricedAirhubPlansForCountry(countryCode);
 
     if (listing.status === "disabled") {
       return jsonError(503, "eSIM checkout is not available.");
@@ -58,6 +58,7 @@ export async function POST(request: Request) {
       guestEmail,
       guestPhone,
       travelDate,
+      pricing: plan.pricing,
     });
     const session = await createEsimStripeSession({
       publicReference: order.publicReference,

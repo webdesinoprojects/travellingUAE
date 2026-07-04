@@ -86,6 +86,10 @@ export type EsimOrderDetail = {
   // Payment (identifiers only — no secret keys)
   price: number | null;
   currency: string | null;
+  supplierPrice: number | null;
+  supplierCurrency: string | null;
+  markupAmount: number | null;
+  pricingRuleId: string | null;
   paidAmount: number | null;
   paidCurrency: string | null;
   paidAt: string | null;

@@ -77,12 +77,20 @@ export function EsimPlanRow({ plan }: { plan: AdminPlanItem }) {
         <div className="min-w-0">
           <p className="truncate font-black">{plan.planName ?? plan.planCode}</p>
           <p className="truncate text-xs text-brand-brown">
-            {plan.countryCode} · {plan.planCode} · {formatEsimMoney(plan.price, plan.currency)}
+            {plan.countryCode} · {plan.planCode}
           </p>
+          <dl className="mt-3 grid gap-2 text-xs font-bold text-brand-brown sm:grid-cols-3">
+            <PriceBit label="Supplier" value={formatEsimMoney(plan.supplierPrice, plan.currency)} />
+            <PriceBit label="Final" value={formatEsimMoney(plan.finalPrice, plan.currency)} strong />
+            <PriceBit label="Profit" value={formatEsimMoney(plan.markupAmount, plan.currency)} />
+          </dl>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <VisibilityBadge isVisible={visible} />
             <FeaturedBadge isFeatured={featured} />
             <span className="text-xs font-bold text-brand-brown">Sort {plan.sortOrder}</span>
+            <span className="rounded-full bg-[#efe3cf] px-2 py-0.5 text-xs font-black text-brand-brown dark:bg-white/10">
+              Pricing {plan.pricingSource}
+            </span>
           </div>
         </div>
 
@@ -192,3 +200,22 @@ export function EsimPlanRow({ plan }: { plan: AdminPlanItem }) {
 
 const inputClass =
   "h-11 w-full rounded-lg border border-border-soft bg-[#fffaf2] px-3 text-sm font-semibold text-brand-navy outline-none focus:border-brand-blue dark:bg-white/10 dark:text-white";
+
+function PriceBit({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="uppercase">{label}</dt>
+      <dd className={`mt-0.5 truncate ${strong ? "text-brand-navy dark:text-white" : ""}`}>
+        {value}
+      </dd>
+    </div>
+  );
+}

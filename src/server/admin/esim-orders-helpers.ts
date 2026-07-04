@@ -100,6 +100,10 @@ export type EsimOrderDetailRow = EsimOrderListRow & {
   travel_date: string | null;
   paid_amount: number | string | null;
   paid_currency: string | null;
+  supplier_price?: number | string | null;
+  supplier_currency?: string | null;
+  markup_amount?: number | string | null;
+  pricing_rule_id?: string | null;
   stripe_checkout_session_id: string | null;
   stripe_payment_intent_id: string | null;
   stripe_completed_event_id: string | null;
@@ -155,6 +159,10 @@ export function toEsimOrderDetail(row: EsimOrderDetailRow): EsimOrderDetail {
 
     price: toNumberOrNull(row.price),
     currency: emptyToNull(row.currency),
+    supplierPrice: toNumberOrNull(row.supplier_price),
+    supplierCurrency: emptyToNull(row.supplier_currency),
+    markupAmount: toNumberOrNull(row.markup_amount),
+    pricingRuleId: emptyToNull(row.pricing_rule_id),
     paidAmount: toNumberOrNull(row.paid_amount),
     paidCurrency: emptyToNull(row.paid_currency),
     paidAt: row.paid_at,
