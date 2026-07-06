@@ -87,7 +87,7 @@ export function Header({ copy, currentLocale, locales, navItems }: HeaderProps) 
         <div className="flex items-center gap-3">
           <Link
             href="/#contact"
-            className="hidden min-h-10 items-center rounded-lg bg-brand-blue px-5 text-sm font-bold text-white shadow-[0_10px_24px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy sm:inline-flex dark:bg-brand-sand dark:text-white dark:hover:bg-brand-sand/90"
+            className="hidden min-h-10 items-center rounded-lg bg-brand-blue px-5 text-sm font-bold text-white shadow-[0_10px_24px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy sm:inline-flex dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
           >
             {copy.enquire}
           </Link>

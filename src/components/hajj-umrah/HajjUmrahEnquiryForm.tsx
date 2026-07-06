@@ -326,7 +326,7 @@ export function HajjUmrahEnquiryForm() {
       <button
         type="submit"
         disabled={status === "submitting"}
-        className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-5 text-sm font-extrabold text-white shadow-[0_16px_34px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy disabled:cursor-not-allowed disabled:opacity-65 dark:bg-brand-sand dark:text-black dark:hover:bg-white"
+        className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-5 text-sm font-extrabold text-white shadow-[0_16px_34px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy disabled:cursor-not-allowed disabled:opacity-65 dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
       >
         <Send aria-hidden="true" className="size-4" />
         {status === "submitting" ? "Submitting..." : "Submit"}
