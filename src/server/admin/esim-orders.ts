@@ -43,6 +43,7 @@ const DETAIL_COLUMNS = [
   "guest_name",
   "guest_email",
   "guest_phone",
+  "email_verified_at",
   "provider",
   "partner_code",
   "country_code",

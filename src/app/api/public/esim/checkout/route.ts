@@ -7,6 +7,7 @@ import {
   createEsimStripeSession,
 } from "@/server/providers/airhub/orders";
 import { getVisiblePricedAirhubPlansForCountry } from "@/server/esim/public-plans";
+import { getFreshEsimEmailVerification } from "@/server/esim/email-verification";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,11 @@ export async function POST(request: Request) {
     );
     const guestPhone = readString(body, "guestPhone", { max: 40 });
     const travelDate = readDateString(body, "travelDate");
+    const verification = await getFreshEsimEmailVerification(guestEmail);
+
+    if (!verification) {
+      return jsonError(403, "Verify your email before payment.");
+    }
 
     // Block checkout for admin-hidden countries (getLocalAirhubCountryByCode
     // returns null for hidden/unknown countries).
@@ -59,6 +65,7 @@ export async function POST(request: Request) {
       guestPhone,
       travelDate,
       pricing: plan.pricing,
+      emailVerifiedAt: verification.verifiedAt,
     });
     const session = await createEsimStripeSession({
       publicReference: order.publicReference,

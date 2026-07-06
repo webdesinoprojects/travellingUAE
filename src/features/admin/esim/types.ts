@@ -73,6 +73,7 @@ export type EsimOrderDetail = {
   guestName: string | null;
   guestEmail: string;
   guestPhone: string | null;
+  emailVerifiedAt: string | null;
 
   // Plan
   provider: string;

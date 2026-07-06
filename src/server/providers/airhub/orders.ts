@@ -5,6 +5,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { getStripe, hasStripeEnv, toStripeAmount } from "@/server/payments/stripe";
 import type { EsimAppliedPricing } from "@/server/esim/pricing-helpers";
 import { getSupabaseAdminClient, hasSupabaseAdminEnv } from "@/server/supabase/client";
+import { sendFulfilledEsimActivationEmail } from "@/server/esim/activation-email";
+import { canStartEsimPayment } from "@/server/esim/otp-helpers";
 
 import type { EsimFulfillmentGuardView } from "@/features/admin/esim/types";
 
@@ -56,10 +58,12 @@ type EsimOrderRow = {
   sim_id: string | null;
   sim_pin: string | null;
   qr_payload: string | null;
+  email_verified_at: string | null;
   status: string;
   stripe_checkout_claim_id: string | null;
   stripe_checkout_session_id: string | null;
   stripe_checkout_url: string | null;
+  activation_email_lookup_token_hash: string | null;
   expires_at: string | null;
 };
 
@@ -76,6 +80,7 @@ export async function createEsimOrderFromPlan(input: {
   guestPhone?: string | null;
   travelDate?: string | null;
   pricing?: EsimAppliedPricing | null;
+  emailVerifiedAt?: string | null;
 }): Promise<CreatedEsimOrder> {
   assertSupabaseReady();
 
@@ -119,6 +124,7 @@ export async function createEsimOrderFromPlan(input: {
     markup_amount: input.pricing?.markupAmount ?? 0,
     pricing_rule_id: input.pricing?.pricingRuleId ?? null,
     travel_date: input.travelDate ?? null,
+    email_verified_at: input.emailVerifiedAt ?? null,
     status: "payment_pending",
     expires_at: expiresAt,
   });
@@ -175,6 +181,14 @@ export async function createEsimStripeSession(input: {
       "stripe_payment_required",
       "This eSIM order is not awaiting payment.",
       409,
+    );
+  }
+
+  if (!canStartEsimPayment(order.email_verified_at)) {
+    throw new AirhubError(
+      "stripe_payment_required",
+      "Verify your email before payment.",
+      403,
     );
   }
 
@@ -369,11 +383,12 @@ async function readOrderForLookup(publicReference: string, lookupToken: string) 
   }
 
   const supabase = getSupabaseAdminClient();
+  const lookupHash = hashAirhubLookupToken(lookupToken);
   const { data, error } = await supabase
     .from("esim_orders")
     .select("*")
     .eq("public_reference", publicReference)
-    .eq("lookup_token_hash", hashAirhubLookupToken(lookupToken))
+    .or(`lookup_token_hash.eq.${lookupHash},activation_email_lookup_token_hash.eq.${lookupHash}`)
     .maybeSingle();
 
   if (error) {
@@ -661,7 +676,14 @@ export async function fulfillPaidEsimOrderWithAirhub(
     .eq("status", "purchase_started");
   if (applied.error) throw applied.error;
 
-  if (outcome.status === "fulfilled") return { kind: "fulfilled" };
+  if (outcome.status === "fulfilled") {
+    try {
+      await sendFulfilledEsimActivationEmail({ orderId: row.id });
+    } catch {
+      console.error("[esim.activation.email]", { scope: "auto", status: "unexpected_error" });
+    }
+    return { kind: "fulfilled" };
+  }
   if (outcome.status === "purchase_failed") return { kind: "failed", reason: outcome.reason };
   return { kind: "pending_review", reason: outcome.reason };
 }

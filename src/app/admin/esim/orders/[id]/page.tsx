@@ -63,6 +63,7 @@ export default async function AdminEsimOrderDetailPage({
           publicReference={order.publicReference}
           stripeCheckoutSessionId={order.stripeCheckoutSessionId}
           fulfillmentGuard={fulfillmentGuard}
+          emailVerifiedAt={order.emailVerifiedAt}
         />
       </div>
 

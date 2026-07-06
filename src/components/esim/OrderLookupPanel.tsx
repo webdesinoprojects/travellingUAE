@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 
 import type { AirhubPublicOrder } from "@/server/providers/airhub/contracts";
+import { EsimDeliveryActions } from "@/components/esim/EsimDeliveryActions";
 import {
   buildCustomerEsimDeliveryModel,
   type CustomerEsimDeliveryModel,
@@ -58,7 +59,13 @@ export function OrderLookupPanel({ order }: { order: AirhubPublicOrder }) {
         </section>
 
         {delivery.isReady ? (
-          <FulfilledActivation delivery={delivery} qrMatrix={qrMatrix} />
+          <FulfilledActivation
+            delivery={delivery}
+            qrMatrix={qrMatrix}
+            orderReference={order.publicReference}
+            planName={order.planName ?? order.planCode}
+            countryName={order.countryName ?? order.countryCode ?? "Selected country"}
+          />
         ) : (
           <ActivationPending status={order.status} />
         )}
@@ -70,9 +77,15 @@ export function OrderLookupPanel({ order }: { order: AirhubPublicOrder }) {
 function FulfilledActivation({
   delivery,
   qrMatrix,
+  orderReference,
+  planName,
+  countryName,
 }: {
   delivery: CustomerEsimDeliveryModel;
   qrMatrix: QrMatrix | null;
+  orderReference: string;
+  planName: string;
+  countryName: string;
 }) {
   return (
     <div className="grid gap-5">
@@ -104,6 +117,13 @@ function FulfilledActivation({
             ) : null}
           </div>
         </div>
+        <EsimDeliveryActions
+          delivery={delivery}
+          qrMatrix={qrMatrix}
+          orderReference={orderReference}
+          planName={planName}
+          countryName={countryName}
+        />
       </section>
 
       <section className="rounded-lg border border-border-soft bg-white p-5 dark:bg-surface-muted">

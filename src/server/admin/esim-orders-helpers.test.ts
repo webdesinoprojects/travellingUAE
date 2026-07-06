@@ -88,6 +88,7 @@ test("toEsimOrderDetail exposes sensitive fields as booleans only — never raw"
     updated_at: "2026-07-01T00:00:00Z",
     expires_at: null,
     guest_phone: "+100",
+    email_verified_at: "2026-07-01T00:00:00Z",
     provider: "airhub",
     partner_code: "PARTNER",
     country_code: "FR",
@@ -142,6 +143,7 @@ test("toEsimOrderDetail exposes sensitive fields as booleans only — never raw"
   // Non-sensitive identifiers are retained for admin display.
   assert.equal(detail.stripeCheckoutSessionId, "cs_123");
   assert.equal(detail.uniqueOrderId, "UID-1");
+  assert.equal(detail.emailVerifiedAt, "2026-07-01T00:00:00Z");
 });
 
 test("toEsimOrderDetail treats empty/whitespace sensitive fields as absent", () => {
@@ -169,6 +171,7 @@ function makeDetailRow(): EsimOrderDetailRow {
     updated_at: "2026-07-01T00:00:00Z",
     expires_at: null,
     guest_phone: null,
+    email_verified_at: null,
     provider: "airhub",
     partner_code: "PARTNER",
     country_code: null,

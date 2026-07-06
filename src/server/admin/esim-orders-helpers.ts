@@ -94,6 +94,7 @@ export type EsimOrderDetailRow = EsimOrderListRow & {
   updated_at: string;
   expires_at: string | null;
   guest_phone: string | null;
+  email_verified_at?: string | null;
   provider: string;
   partner_code: string;
   country_code: string | null;
@@ -148,6 +149,7 @@ export function toEsimOrderDetail(row: EsimOrderDetailRow): EsimOrderDetail {
     guestName: emptyToNull(row.guest_name),
     guestEmail: row.guest_email,
     guestPhone: emptyToNull(row.guest_phone),
+    emailVerifiedAt: row.email_verified_at ?? null,
 
     provider: row.provider,
     partnerCode: row.partner_code,

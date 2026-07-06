@@ -67,7 +67,7 @@ export function EsimOrdersTable({ items }: { items: EsimOrderListItem[] }) {
                 <td className="px-4 py-3 text-right">
                   <Link
                     href={`/admin/esim/orders/${item.id}`}
-                    className="inline-flex items-center gap-1 rounded-lg border border-border-soft bg-white px-3 py-1.5 text-xs font-black text-brand-navy hover:bg-[#fffaf2] dark:bg-white/10 dark:text-white"
+                    className="inline-flex items-center gap-1 rounded-lg border border-border-soft bg-white px-3 py-1.5 text-xs font-black text-brand-navy hover:bg-[#fffaf2] dark:bg-white/10 dark:text-white dark:hover:bg-white/[0.14]"
                   >
                     View
                     <ArrowUpRight aria-hidden="true" className="size-3.5" />

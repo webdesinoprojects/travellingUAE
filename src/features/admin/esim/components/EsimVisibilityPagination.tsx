@@ -86,7 +86,7 @@ function PageLink({
     <Link
       href={queryString ? `${basePath}?${queryString}` : basePath}
       aria-label={label}
-      className={`${className} bg-white text-brand-navy hover:bg-[#fffaf2] dark:bg-white/10 dark:text-white`}
+      className={`${className} bg-white text-brand-navy hover:bg-[#fffaf2] dark:bg-white/10 dark:text-white dark:hover:bg-white/[0.14]`}
     >
       {children}
     </Link>

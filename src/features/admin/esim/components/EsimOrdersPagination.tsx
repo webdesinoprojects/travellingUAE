@@ -91,7 +91,7 @@ function PageLink({
     <Link
       href={queryString ? `/admin/esim/orders?${queryString}` : "/admin/esim/orders"}
       aria-label={ariaLabel}
-      className={`${className} bg-white text-brand-navy hover:bg-[#fffaf2] dark:bg-white/10 dark:text-white`}
+      className={`${className} bg-white text-brand-navy hover:bg-[#fffaf2] dark:bg-white/10 dark:text-white dark:hover:bg-white/[0.14]`}
     >
       {children}
     </Link>
