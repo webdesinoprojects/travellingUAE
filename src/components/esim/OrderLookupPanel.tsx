@@ -90,7 +90,7 @@ function FulfilledActivation({
           )}
           <div>
             <p className="text-sm font-semibold text-brand-navy/65 dark:text-white/65">
-              Scan this QR code from your phone eSIM setup screen. Keep this page private because it contains your activation details.
+              Scan this QR code from the eSIM setup screen on your phone. Keep this page private because it contains your activation details.
             </p>
             {delivery.manualActivationCode ? (
               <div className="mt-4">
@@ -134,7 +134,7 @@ function FulfilledActivation({
         </div>
         {delivery.apn ? (
           <p className="mt-4 text-sm font-semibold text-brand-navy/60 dark:text-white/60">
-            If mobile data does not connect after installation, enter the APN shown above in your phone cellular network settings.
+            If mobile data does not connect after installation, enter the APN shown above in your cellular network settings.
           </p>
         ) : null}
       </section>
