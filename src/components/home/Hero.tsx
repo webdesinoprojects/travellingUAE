@@ -67,7 +67,7 @@ export async function Hero({ copy, media, initialService }: HeroProps) {
           </div>
         </div>
 
-        <div className="mt-10 grid gap-3 border-t border-white/18 pt-5 text-white/86 sm:grid-cols-3">
+        <div className="mt-10 grid grid-cols-3 gap-3 border-t border-white/18 pt-5 text-center text-white/86 sm:justify-items-center">
           {copy.stats.map((stat) => (
             <Stat key={stat.label} value={stat.value} label={stat.label} />
           ))}
@@ -79,7 +79,7 @@ export async function Hero({ copy, media, initialService }: HeroProps) {
 
 function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div>
+    <div className="w-full min-w-0 sm:max-w-[220px]">
       <p className="font-serif text-4xl leading-none text-white">{value}</p>
       <p className="mt-1 text-sm font-semibold uppercase text-white/65">
         {label}
