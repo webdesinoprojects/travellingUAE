@@ -767,6 +767,15 @@ describe("toProviderBookingPublicStatus", () => {
     assert.equal(result.nextAction, "wait");
   });
 
+  test("requires_3ds -> in_progress, complete_3ds", () => {
+    const result = toProviderBookingPublicStatus({
+      bookingId: "00000000-0000-0000-0000-000000000006",
+      providerOrderStatus: "requires_3ds",
+    });
+    assert.equal(result.providerState, "in_progress");
+    assert.equal(result.nextAction, "complete_3ds");
+  });
+
   test("failed -> failed state, contact_support", () => {
     const result = toProviderBookingPublicStatus({
       bookingId: "00000000-0000-0000-0000-000000000003",

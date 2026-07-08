@@ -11,7 +11,7 @@ export type StandaloneHotelBookingStatus =
   | "pending_review"
   | "expired";
 
-export const DEFAULT_STANDALONE_CONFIRMATION_WINDOW_SECONDS = 180;
+export const DEFAULT_STANDALONE_CONFIRMATION_WINDOW_SECONDS = 600;
 export const STANDALONE_STRIPE_CLAIM_STALE_MS = 2 * 60 * 1000;
 
 export type StandaloneStripeClaimDecision =
@@ -105,9 +105,8 @@ export function nextStandaloneStatusFromStatusClassification(
       return "confirmed";
     case "poll":
     case "unknown":
-      return "processing";
     case "requires_3ds":
-      return "pending_review";
+      return "processing";
     case "failed":
       return "failed";
     default:

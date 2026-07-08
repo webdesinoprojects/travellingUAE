@@ -484,6 +484,8 @@ export type SelectedPaymentType = {
    */
   isNeedCreditCardData?: boolean;
   isNeedCvc?: boolean;
+  /** Sanitized 3DS redirect returned by ETG finish/status for `now` payments. */
+  threeDs?: ThreeDsRedirect & { requiredAt?: string };
 };
 
 /** `supplier_data` block. Only real, collected values are sent; never invented. */

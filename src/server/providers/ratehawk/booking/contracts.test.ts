@@ -122,6 +122,14 @@ test("status: 3ds STATUS -> requires_3ds", () => {
   assert.deepEqual(classifyBookingStatus(sig({ status: "3ds" })), { kind: "requires_3ds" });
 });
 
+test("status: 3ds from immediate finish/status check -> requires_3ds", () => {
+  assert.deepEqual(classifyBookingStatus(sig({ status: "3ds" })), { kind: "requires_3ds" });
+});
+
+test("status: 3ds from later finish/status poll -> requires_3ds", () => {
+  assert.deepEqual(classifyBookingStatus(sig({ status: "3ds" })), { kind: "requires_3ds" });
+});
+
 test("status: timeout/unknown error + 5xx -> poll", () => {
   for (const code of STATUS_POLL_CODES) {
     assert.deepEqual(classifyBookingStatus(sig({ error: code })), { kind: "poll" }, code);

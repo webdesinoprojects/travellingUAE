@@ -34,11 +34,14 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("checkout_id") ??
       "";
     const stripeSessionId = request.nextUrl.searchParams.get("session_id");
+    const threeDsReturned =
+      request.nextUrl.searchParams.get("three_ds_return") === "1";
 
     const status = await getStandaloneHotelPublicStatus({
       checkoutId,
       checkoutToken: request.cookies.get(HOTEL_CHECKOUT_COOKIE)?.value,
       stripeSessionId,
+      threeDsReturned,
     });
 
     if (!status) {

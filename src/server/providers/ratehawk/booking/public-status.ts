@@ -15,7 +15,11 @@ export type ProviderBookingPublicState =
   | "cancelled"
   | "review";
 
-export type ProviderBookingNextAction = "wait" | "contact_support" | null;
+export type ProviderBookingNextAction =
+  | "wait"
+  | "complete_3ds"
+  | "contact_support"
+  | null;
 
 export type ProviderBookingPublicStatus = {
   /** Last 8 chars of the booking UUID, uppercased. Safe to show to users. */
@@ -62,8 +66,10 @@ function mapState(raw: string | null): {
     case "creating":
     case "starting":
     case "processing":
-    case "requires_3ds":
       return { providerState: "in_progress", nextAction: "wait" };
+
+    case "requires_3ds":
+      return { providerState: "in_progress", nextAction: "complete_3ds" };
 
     case "confirmed":
       return { providerState: "confirmed", nextAction: null };

@@ -7,9 +7,17 @@ export const dynamic = "force-dynamic";
 export default async function StandaloneHotelCheckoutSuccessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checkout_id?: string; session_id?: string }>;
+  searchParams: Promise<{
+    checkout_id?: string;
+    session_id?: string;
+    three_ds_return?: string;
+  }>;
 }) {
-  const { checkout_id: checkoutId = "", session_id: sessionId = "" } = await searchParams;
+  const {
+    checkout_id: checkoutId = "",
+    session_id: sessionId = "",
+    three_ds_return: threeDsReturn = "",
+  } = await searchParams;
 
   if (!checkoutId) {
     return (
@@ -27,7 +35,11 @@ export default async function StandaloneHotelCheckoutSuccessPage({
   return (
     <main className="grid min-h-screen place-items-center bg-background px-4 pt-24 text-brand-navy dark:text-white">
       <section className="w-full max-w-[760px]">
-        <StandaloneHotelStatusPoller checkoutId={checkoutId} stripeSessionId={sessionId || null} />
+        <StandaloneHotelStatusPoller
+          checkoutId={checkoutId}
+          stripeSessionId={sessionId || null}
+          threeDsReturned={threeDsReturn === "1"}
+        />
       </section>
     </main>
   );

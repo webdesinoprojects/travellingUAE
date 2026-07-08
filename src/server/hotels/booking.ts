@@ -232,7 +232,8 @@ export type StandaloneHotelPublicStatus = {
   checkoutId: string;
   state: "pending" | "in_progress" | "confirmed" | "failed" | "review" | "unsupported";
   message: string;
-  nextAction: "wait" | "contact_support" | null;
+  nextAction: "wait" | "complete_3ds" | "contact_support" | null;
+  threeDs?: ThreeDsRedirect | null;
 };
 
 export class StandaloneHotelBookingError extends Error {
@@ -1016,6 +1017,7 @@ export async function getStandaloneHotelPublicStatus(input: {
   checkoutId: string;
   checkoutToken: string | undefined;
   stripeSessionId?: string | null;
+  threeDsReturned?: boolean;
 }): Promise<StandaloneHotelPublicStatus | null> {
   if (input.stripeSessionId) {
     await ensureStandaloneHotelStripeSuccessFromSession({
@@ -1036,7 +1038,9 @@ export async function getStandaloneHotelPublicStatus(input: {
   const current = fresh ?? row;
 
   if (isStandaloneStatusPollEligible(current.status)) {
-    await maybePollStandaloneStatus(current);
+    await maybePollStandaloneStatus(current, {
+      threeDsReturned: input.threeDsReturned === true,
+    });
   }
 
   const latest = await loadStandaloneSession(input.checkoutId, input.checkoutToken, {
@@ -1263,11 +1267,16 @@ export async function finishStandaloneHotelNowBooking(input: {
 
   // Idempotency: only a fresh, tokenized session may start the finish call.
   if (row.status !== "form_created") {
-    return { status: mapNowStatus(row.status), threeDs: null, successUrl };
+    const threeDs = readStoredThreeDs(row.selected_payment_type);
+    return {
+      status: threeDs ? "3ds" : mapNowStatus(row.status),
+      threeDs,
+      successUrl,
+    };
   }
 
   const nowIso = new Date().toISOString();
-  const returnPath = successUrl;
+  const returnPath = standaloneNowSuccessUrl(row.id, { threeDsReturn: true });
   const storedSelected = buildStoredNowSelectedPayment(selected, {
     initUuid: selected.initUuid,
     payUuid: selected.payUuid,
@@ -1293,7 +1302,12 @@ export async function finishStandaloneHotelNowBooking(input: {
   const claimedRows = Array.isArray(claim.data) ? claim.data : [];
   if (claimedRows.length !== 1) {
     const current = await loadStandaloneSessionById(row.id);
-    return { status: mapNowStatus(current?.status ?? "processing"), threeDs: null, successUrl };
+    const threeDs = current ? readStoredThreeDs(current.selected_payment_type) : null;
+    return {
+      status: threeDs ? "3ds" : mapNowStatus(current?.status ?? "processing"),
+      threeDs,
+      successUrl,
+    };
   }
   let claimed = normalizeStandaloneRow(claimedRows[0] as Record<string, unknown>);
 
@@ -1395,9 +1409,17 @@ export async function finishStandaloneHotelNowBooking(input: {
   return { status: mapNowStatus(outcome.status), threeDs: null, successUrl };
 }
 
-function standaloneNowSuccessUrl(checkoutId: string): string {
+function standaloneNowSuccessUrl(
+  checkoutId: string,
+  options?: { threeDsReturn?: boolean },
+): string {
   const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  return `${siteUrl}/hotels/checkout/success?checkout_id=${encodeURIComponent(checkoutId)}`;
+  const url = new URL("/hotels/checkout/success", siteUrl);
+  url.searchParams.set("checkout_id", checkoutId);
+  if (options?.threeDsReturn) {
+    url.searchParams.set("three_ds_return", "1");
+  }
+  return url.toString();
 }
 
 function mapNowStatus(status: StandaloneStatus): "processing" | "confirmed" | "failed" | "3ds" {
@@ -1882,7 +1904,10 @@ async function startStandaloneBookingFinish(row: StandaloneSessionRow): Promise<
   await markStandaloneReview(row, "booking_finish_unknown");
 }
 
-async function maybePollStandaloneStatus(row: StandaloneSessionRow): Promise<void> {
+async function maybePollStandaloneStatus(
+  row: StandaloneSessionRow,
+  options: { threeDsReturned?: boolean } = {},
+): Promise<void> {
   if (
     isStandaloneBookingCutoffReached({
       bookingCutoffAt: row.booking_cutoff_at,
@@ -1891,18 +1916,29 @@ async function maybePollStandaloneStatus(row: StandaloneSessionRow): Promise<voi
       nowMs: Date.now(),
     })
   ) {
-    await markStandaloneReview(row, "booking_status_cutoff");
+    const code = readStoredThreeDs(row.selected_payment_type)
+      ? "3ds_verification_cutoff"
+      : "booking_status_cutoff";
+    logStandaloneStatusCutoff(row.id, code);
+    await markStandaloneReview(row, code);
     return;
   }
 
   const last = row.finish_status_last_checked_at
     ? new Date(row.finish_status_last_checked_at).getTime()
     : 0;
-  if (Date.now() - last < STATUS_POLL_INTERVAL_MS - 250) return;
+  if (
+    !options.threeDsReturned &&
+    Date.now() - last < STATUS_POLL_INTERVAL_MS - 250
+  ) {
+    return;
+  }
 
   const body = buildBookingStatusRequest(row.partner_order_id);
   const signal = await rateHawkBookingRequest(BOOKING_ENDPOINTS.bookingFinishStatus, body);
-  await applyStandaloneFinishStatus(row, signal);
+  await applyStandaloneFinishStatus(row, signal, {
+    threeDsReturned: options.threeDsReturned === true,
+  });
 }
 
 type StandaloneFinishStatusOutcome = {
@@ -1923,6 +1959,7 @@ type StandaloneFinishStatusOutcome = {
 async function applyStandaloneFinishStatus(
   row: StandaloneSessionRow,
   signal: { httpStatus: number; status: string | null; error: string | null; data: unknown },
+  options: { threeDsReturned?: boolean } = {},
 ): Promise<StandaloneFinishStatusOutcome> {
   const classification = classifyBookingStatus(signal);
   const isNow = row.selected_payment_type?.type === "now";
@@ -1948,22 +1985,47 @@ async function applyStandaloneFinishStatus(
 
   if (classification.kind === "requires_3ds") {
     if (isNow) {
+      const threeDs = parseThreeDsRedirect(signal.data);
+      logStandaloneNowThreeDsRequired(row.id, Boolean(threeDs));
+
+      if (!threeDs) {
+        await markStandaloneReview(row, "3ds_redirect_missing");
+        return { status: "pending_review", threeDs: null };
+      }
+
       await updateStandaloneAndBooking(row, {
-        session: { ...basePatch, status: "processing" },
+        session: {
+          ...basePatch,
+          status: "processing",
+          selected_payment_type: storeThreeDsRedirect(
+            row.selected_payment_type,
+            threeDs,
+            nowIso,
+          ),
+        },
         booking: {
-          provider_order_status: "processing",
+          provider_order_status: "requires_3ds",
           provider_last_status_at: nowIso,
         },
       });
-      return { status: "processing", threeDs: parseThreeDsRedirect(signal.data) };
+      return { status: "processing", threeDs };
     }
     await markStandaloneReview(row, "unexpected_3ds_for_deposit");
     return { status: "pending_review", threeDs: null };
   }
 
   if (classification.kind === "poll" || classification.kind === "unknown") {
+    const sessionPatch: Record<string, unknown> = {
+      ...basePatch,
+      status: "processing",
+    };
+
+    if (isNow && options.threeDsReturned) {
+      sessionPatch.selected_payment_type = clearStoredThreeDs(row.selected_payment_type);
+    }
+
     await updateStandaloneAndBooking(row, {
-      session: { ...basePatch, status: "processing" },
+      session: sessionPatch,
       booking: {
         provider_order_status: "processing",
         provider_last_status_at: nowIso,
@@ -1979,6 +2041,83 @@ async function applyStandaloneFinishStatus(
       : "booking_status_failed",
   );
   return { status: "failed", threeDs: null };
+}
+
+function readStoredThreeDs(selected: SelectedPaymentType | null): ThreeDsRedirect | null {
+  const threeDs = selected?.threeDs;
+
+  if (!threeDs || typeof threeDs !== "object") {
+    return null;
+  }
+
+  const actionUrl =
+    typeof threeDs.actionUrl === "string" ? threeDs.actionUrl.trim() : "";
+
+  if (!/^https:\/\//i.test(actionUrl)) {
+    return null;
+  }
+
+  const method = threeDs.method === "get" ? "get" : "post";
+  const fields: Record<string, string> = {};
+
+  if (threeDs.fields && typeof threeDs.fields === "object") {
+    for (const [key, value] of Object.entries(threeDs.fields)) {
+      if (typeof value === "string") {
+        fields[key] = value;
+      }
+    }
+  }
+
+  return { actionUrl, method, fields };
+}
+
+function storeThreeDsRedirect(
+  selected: SelectedPaymentType | null,
+  threeDs: ThreeDsRedirect,
+  requiredAt: string,
+): SelectedPaymentType | null {
+  if (!selected) {
+    return null;
+  }
+
+  return {
+    ...selected,
+    threeDs: {
+      actionUrl: threeDs.actionUrl,
+      method: threeDs.method,
+      fields: threeDs.fields,
+      requiredAt,
+    },
+  };
+}
+
+function clearStoredThreeDs(
+  selected: SelectedPaymentType | null,
+): SelectedPaymentType | null {
+  if (!selected) {
+    return null;
+  }
+
+  const copy = { ...selected };
+  delete copy.threeDs;
+  return copy;
+}
+
+function logStandaloneNowThreeDsRequired(
+  checkoutId: string,
+  hasRedirect: boolean,
+): void {
+  console.info("[standalone.hotel.now.3ds_required]", {
+    checkoutId,
+    hasRedirect,
+  });
+}
+
+function logStandaloneStatusCutoff(checkoutId: string, code: string): void {
+  console.warn("[standalone.hotel.booking.cutoff]", {
+    checkoutId,
+    code,
+  });
 }
 
 async function mirrorBookingTerminalState(row: StandaloneSessionRow): Promise<void> {
@@ -2252,17 +2391,31 @@ function toPublicStatus(row: StandaloneSessionRow): StandaloneHotelPublicStatus 
       return {
         checkoutId: row.id,
         state: "review",
-        message: "Your hotel booking requires manual review. Our team will contact you.",
+        message: pendingReviewMessage(row.provider_result_code),
         nextAction: "contact_support",
       };
     case "finish_started":
-    case "processing":
+    case "processing": {
+      const threeDs = readStoredThreeDs(row.selected_payment_type);
+
+      if (threeDs) {
+        return {
+          checkoutId: row.id,
+          state: "in_progress",
+          message:
+            "Complete card verification with your bank to continue confirming this hotel.",
+          nextAction: "complete_3ds",
+          threeDs,
+        };
+      }
+
       return {
         checkoutId: row.id,
         state: "in_progress",
         message: "Your hotel booking is being confirmed with the provider.",
         nextAction: "wait",
       };
+    }
     default:
       return {
         checkoutId: row.id,
@@ -2271,6 +2424,18 @@ function toPublicStatus(row: StandaloneSessionRow): StandaloneHotelPublicStatus 
         nextAction: "wait",
       };
   }
+}
+
+function pendingReviewMessage(code: string | null): string {
+  if (code === "3ds_verification_cutoff") {
+    return "Card verification was not completed in time. Our team will review the booking and contact you.";
+  }
+
+  if (code === "3ds_redirect_missing") {
+    return "Card verification was required, but the verification link was not available. Our team will contact you.";
+  }
+
+  return "Your hotel booking requires manual review. Our team will contact you.";
 }
 
 function unsupportedPaymentReason(types: string[]): string {

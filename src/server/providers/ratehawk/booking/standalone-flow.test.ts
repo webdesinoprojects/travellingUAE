@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_STANDALONE_CONFIRMATION_WINDOW_SECONDS,
   decideStandaloneStripeCheckoutClaim,
   isStandaloneBookingCutoffReached,
   isStandaloneStatusPollEligible,
@@ -102,20 +103,28 @@ test("standalone: finish/status final failure marks failed/support path", () => 
     nextStandaloneStatusFromStatusClassification({ kind: "failed", code: "soldout" }),
     "failed",
   );
-  assert.equal(
-    nextStandaloneStatusFromStatusClassification({ kind: "requires_3ds" }),
-    "pending_review",
-  );
 });
 
-test("standalone: booking confirmation cutoff routes to support review", () => {
+test("standalone: finish/status 3ds remains processing so user can verify card", () => {
+  assert.equal(
+    nextStandaloneStatusFromStatusClassification({ kind: "requires_3ds" }),
+    "processing",
+  );
+  assert.equal(isStandaloneStatusPollEligible("processing"), true);
+});
+
+test("standalone: default booking confirmation cutoff is 600 seconds", () => {
+  assert.equal(DEFAULT_STANDALONE_CONFIRMATION_WINDOW_SECONDS, 600);
+});
+
+test("standalone: booking confirmation cutoff waits 600 seconds by default", () => {
   const finishStartedAt = "2026-06-29T12:00:00Z";
   assert.equal(
     isStandaloneBookingCutoffReached({
       bookingCutoffAt: null,
       finishStartedAt,
-      confirmationWindowMs: 180_000,
-      nowMs: Date.parse("2026-06-29T12:02:59Z"),
+      confirmationWindowMs: DEFAULT_STANDALONE_CONFIRMATION_WINDOW_SECONDS * 1000,
+      nowMs: Date.parse("2026-06-29T12:09:59Z"),
     }),
     false,
   );
@@ -123,8 +132,8 @@ test("standalone: booking confirmation cutoff routes to support review", () => {
     isStandaloneBookingCutoffReached({
       bookingCutoffAt: null,
       finishStartedAt,
-      confirmationWindowMs: 180_000,
-      nowMs: Date.parse("2026-06-29T12:03:00Z"),
+      confirmationWindowMs: DEFAULT_STANDALONE_CONFIRMATION_WINDOW_SECONDS * 1000,
+      nowMs: Date.parse("2026-06-29T12:10:00Z"),
     }),
     true,
   );
