@@ -3,6 +3,7 @@
 import { AlertCircle, CreditCard, Loader2, ShieldAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ThreeDsVerificationForm, type ThreeDsRedirect } from "@/components/hotels/ThreeDsVerificationForm";
 import type { StandaloneHotelCheckoutSummaryDTO } from "@/types/hotels";
 import type { CheckoutGuestGender, CheckoutGuestRoom } from "@/types/itinerary";
 
@@ -36,12 +37,6 @@ type ApiResponse<T> = {
   data?: T;
 };
 
-type ThreeDsRedirect = {
-  actionUrl: string;
-  method: "get" | "post";
-  fields: Record<string, string>;
-};
-
 type FinishData = {
   status: "processing" | "confirmed" | "failed" | "3ds";
   threeDs: ThreeDsRedirect | null;
@@ -68,22 +63,6 @@ function createGuestRooms(rooms: CheckoutGuestRoom[]): GuestFormRoom[] {
   }));
 }
 
-/** Submit the ETG 3-D Secure redirect as a top-level form post/get to the ACS. */
-function submitThreeDsRedirect(threeDs: ThreeDsRedirect) {
-  const form = document.createElement("form");
-  form.method = threeDs.method === "get" ? "GET" : "POST";
-  form.action = threeDs.actionUrl;
-  for (const [name, value] of Object.entries(threeDs.fields)) {
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = name;
-    input.value = value;
-    form.appendChild(input);
-  }
-  document.body.appendChild(form);
-  form.submit();
-}
-
 export function StandaloneHotelCheckoutForm({ summary }: Props) {
   const [guestRooms, setGuestRooms] = useState<GuestFormRoom[]>(() =>
     createGuestRooms(summary.rooms),
@@ -91,6 +70,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
   const [card, setCard] = useState<CardFields>(EMPTY_CARD);
   const [payState, setPayState] = useState<PayState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [threeDsRedirect, setThreeDsRedirect] = useState<ThreeDsRedirect | null>(null);
 
   const isDeposit = summary.payment.mode === "deposit";
   const isNow = summary.payment.mode === "now";
@@ -142,6 +122,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
   async function handleDepositSubmit(form: HTMLFormElement) {
     setPayState("redirecting");
     setErrorMessage(null);
+    setThreeDsRedirect(null);
 
     const body = { ...readContact(form), guestRooms };
     try {
@@ -175,6 +156,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
   async function handleNowSubmit(form: HTMLFormElement) {
     setPayState("processing");
     setErrorMessage(null);
+    setThreeDsRedirect(null);
 
     const contact = readContact(form);
 
@@ -237,8 +219,8 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
 
       const data = finishPayload.data;
       if (data.threeDs) {
-        // Hand off to the issuer's 3-D Secure page; it returns to successUrl.
-        submitThreeDsRedirect(data.threeDs);
+        setThreeDsRedirect(data.threeDs);
+        setPayState("idle");
         return;
       }
 
@@ -263,28 +245,30 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
   }
 
   const busy = payState === "redirecting" || payState === "processing";
+  const awaitingThreeDs = Boolean(threeDsRedirect);
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-6">
-      {summary.priceChanged ? (
-        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-sm font-semibold text-amber-900 dark:text-amber-100">
-          The provider updated the room price from{" "}
-          {summary.originalPrice?.currency} {summary.originalPrice?.amount.toLocaleString("en")} to{" "}
-          {summary.price.currency} {summary.price.amount.toLocaleString("en")}.
-        </div>
-      ) : null}
-
-      {summary.payment.mode === "unsupported" ? (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 p-5 text-sm text-amber-950 dark:text-amber-100">
-          <AlertCircle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-          <div>
-            <h2 className="font-black">Online card payment is unavailable</h2>
-            <p className="mt-2 leading-6">{summary.payment.reason}</p>
+    <>
+      <form onSubmit={handleSubmit} className="grid gap-6">
+        {summary.priceChanged ? (
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-sm font-semibold text-amber-900 dark:text-amber-100">
+            The provider updated the room price from{" "}
+            {summary.originalPrice?.currency} {summary.originalPrice?.amount.toLocaleString("en")} to{" "}
+            {summary.price.currency} {summary.price.amount.toLocaleString("en")}.
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <section className="grid gap-4">
+        {summary.payment.mode === "unsupported" ? (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 p-5 text-sm text-amber-950 dark:text-amber-100">
+            <AlertCircle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+            <div>
+              <h2 className="font-black">Online card payment is unavailable</h2>
+              <p className="mt-2 leading-6">{summary.payment.reason}</p>
+            </div>
+          </div>
+        ) : null}
+
+        <section className="grid gap-4">
         <h2 className="text-xl font-black">Contact details</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <TextInput name="firstName" label="First name" autoComplete="given-name" required />
@@ -430,7 +414,7 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
 
       <button
         type="submit"
-        disabled={!payable || busy}
+        disabled={!payable || busy || awaitingThreeDs}
         className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-6 text-sm font-extrabold text-white transition hover:bg-brand-blue-strong disabled:cursor-not-allowed disabled:opacity-55 dark:bg-brand-sand dark:text-brand-navy"
       >
         {busy ? (
@@ -438,15 +422,36 @@ export function StandaloneHotelCheckoutForm({ summary }: Props) {
         ) : (
           <CreditCard className="size-4" aria-hidden="true" />
         )}
-        {busy
-          ? isNow
-            ? "Confirming your booking"
-            : "Opening secure payment"
-          : paymentLabel
-            ? `Pay ${paymentLabel}`
-            : "Payment unavailable"}
+        {awaitingThreeDs
+          ? "Complete verification below"
+          : busy
+            ? isNow
+              ? "Confirming your booking"
+              : "Opening secure payment"
+            : paymentLabel
+              ? `Pay ${paymentLabel}`
+              : "Payment unavailable"}
       </button>
     </form>
+    {threeDsRedirect ? (
+      <section className="mt-6 rounded-lg border border-brand-blue/20 bg-brand-blue/5 p-5 text-brand-navy dark:border-brand-sand/25 dark:bg-brand-sand/10 dark:text-white">
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="mt-0.5 size-5 shrink-0 text-brand-blue dark:text-brand-sand" aria-hidden="true" />
+          <div className="min-w-0">
+            <h2 className="text-lg font-black">Complete card verification</h2>
+            <p className="mt-2 text-sm leading-6 text-brand-navy/70 dark:text-white/70">
+              Your bank needs one more verification step before ETG can finish the booking.
+            </p>
+            <ThreeDsVerificationForm
+              threeDs={threeDsRedirect}
+              className="mt-4"
+              buttonClassName="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand-navy px-5 text-sm font-extrabold text-white transition hover:bg-brand-blue dark:bg-brand-sand dark:text-brand-navy"
+            />
+          </div>
+        </div>
+      </section>
+    ) : null}
+    </>
   );
 }
 

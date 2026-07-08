@@ -3,18 +3,14 @@
 import { AlertTriangle, CheckCircle2, CreditCard, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { ThreeDsVerificationForm, type ThreeDsRedirect } from "@/components/hotels/ThreeDsVerificationForm";
+
 type PublicStatus = {
   checkoutId: string;
   state: "pending" | "in_progress" | "confirmed" | "failed" | "review" | "unsupported";
   message: string;
   nextAction: "wait" | "complete_3ds" | "contact_support" | null;
   threeDs?: ThreeDsRedirect | null;
-};
-
-type ThreeDsRedirect = {
-  actionUrl: string;
-  method: "get" | "post";
-  fields: Record<string, string>;
 };
 
 type ApiResponse = {
@@ -30,21 +26,6 @@ type Props = {
 };
 
 const TERMINAL_STATES = new Set(["confirmed", "failed", "review", "unsupported"]);
-
-function submitThreeDsRedirect(threeDs: ThreeDsRedirect) {
-  const form = document.createElement("form");
-  form.method = threeDs.method === "get" ? "GET" : "POST";
-  form.action = threeDs.actionUrl;
-  for (const [name, value] of Object.entries(threeDs.fields)) {
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = name;
-    input.value = value;
-    form.appendChild(input);
-  }
-  document.body.appendChild(form);
-  form.submit();
-}
 
 export function StandaloneHotelStatusPoller({
   checkoutId,
@@ -138,15 +119,12 @@ export function StandaloneHotelStatusPoller({
       {error ? (
         <p className="mt-4 text-sm font-semibold text-red-700 dark:text-red-200">{error}</p>
       ) : null}
-      {needsThreeDs && status?.threeDs ? (
-        <button
-          type="button"
-          onClick={() => submitThreeDsRedirect(status.threeDs!)}
-          className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand-navy px-5 text-sm font-extrabold text-white transition hover:bg-brand-blue dark:bg-brand-sand dark:text-brand-navy"
-        >
-          <CreditCard aria-hidden="true" className="size-4" />
-          Complete card verification
-        </button>
+      {needsThreeDs ? (
+        <ThreeDsVerificationForm
+          threeDs={status?.threeDs}
+          className="mt-6"
+          buttonClassName="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand-navy px-5 text-sm font-extrabold text-white transition hover:bg-brand-blue dark:bg-brand-sand dark:text-brand-navy"
+        />
       ) : null}
       {!isConfirmed && !needsSupport && !needsThreeDs ? (
         <p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-brand-navy/45 dark:text-white/45">

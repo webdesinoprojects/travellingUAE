@@ -308,6 +308,23 @@ test("parseThreeDsRedirect extracts a safe ACS redirect", () => {
   });
 });
 
+test("parseThreeDsRedirect preserves exact 3DS field names and PaReq line breaks", () => {
+  const paReq = "line1\r\nline2\nline3";
+  const termUrl = "https://flytime.example/hotels/checkout/success?checkout_id=abc&three_ds_return=1";
+  const redirect = parseThreeDsRedirect({
+    data_3ds: {
+      action_url: "https://acs.example.com/auth/start.do",
+      method: "post",
+      data: { MD: "md-1", PaReq: paReq, TermUrl: termUrl },
+    },
+  });
+
+  assert.equal(redirect?.fields.MD, "md-1");
+  assert.equal(redirect?.fields.PaReq, paReq);
+  assert.equal(redirect?.fields.TermUrl, termUrl);
+  assert.deepEqual(Object.keys(redirect?.fields ?? {}), ["MD", "PaReq", "TermUrl"]);
+});
+
 test("parseThreeDsRedirect rejects missing block or insecure action_url", () => {
   assert.equal(parseThreeDsRedirect({}), null);
   assert.equal(parseThreeDsRedirect(null), null);
