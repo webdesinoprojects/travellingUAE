@@ -313,8 +313,10 @@ function AdminSidebar({
               pathname === item.href ||
               (item.href !== "/admin" && pathname.startsWith(`${item.href}/`)) ||
               childActive;
-            const isSectionOpen =
-              Boolean(openSections[item.label]) || (childActive && !isCollapsed);
+            const sectionOpenState = openSections[item.label];
+            const isSectionOpen = isCollapsed
+              ? false
+              : sectionOpenState ?? childActive;
 
             if (hasChildren) {
               return (
