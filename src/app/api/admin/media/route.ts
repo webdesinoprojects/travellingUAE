@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 
+import { getAdminResourceDTO } from "@/server/admin/dal";
 import { writeAdminAuditLog } from "@/server/admin/audit";
 import { jsonError, jsonOk, logServerError } from "@/server/http/response";
 import {
@@ -22,6 +23,33 @@ import {
 import { verifyAdminApiAccess } from "@/server/supabase/auth";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(request: NextRequest) {
+  try {
+    const access = await verifyAdminApiAccess(request, "editor");
+
+    if (!access.ok) {
+      return jsonError(access.status, "You are not allowed to access this area.");
+    }
+
+    const params = request.nextUrl.searchParams;
+    const config = await getAdminResourceDTO("media", {
+      q: params.get("q") ?? undefined,
+      status: params.get("status") ?? "published",
+      cursor: params.get("cursor") ?? undefined,
+      limit: params.get("limit") ? Number(params.get("limit")) : 48,
+      folder: params.get("folder") ?? undefined,
+    });
+
+    return jsonOk({
+      media: config.rows,
+      pageInfo: config.pageInfo,
+    });
+  } catch (error) {
+    logServerError("api.admin.media.list", error);
+    return jsonError(500, "Media could not be loaded.");
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {

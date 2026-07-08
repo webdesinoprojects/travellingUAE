@@ -44,7 +44,13 @@ const initialForm: FormState = {
 const genericError =
   "We could not submit the enquiry right now. Please try again in a moment.";
 
-export function HajjUmrahEnquiryForm() {
+export function HajjUmrahEnquiryForm({
+  intro = "Share your details and the Fly Time team will follow up.",
+  title = "Book Your Pilgrimage",
+}: {
+  intro?: string;
+  title?: string;
+}) {
   const [form, setForm] = useState<FormState>(initialForm);
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">(
     "idle",
@@ -139,10 +145,10 @@ export function HajjUmrahEnquiryForm() {
     >
       <div className="text-center">
         <h2 className="font-serif text-2xl font-semibold text-brand-navy sm:text-3xl dark:text-white">
-          Book Your Pilgrimage
+          {title}
         </h2>
         <p className="mt-2 text-sm font-semibold leading-6 text-brand-brown dark:text-brand-sand/88">
-          Share your details and the Fly Time team will follow up.
+          {intro}
         </p>
       </div>
 

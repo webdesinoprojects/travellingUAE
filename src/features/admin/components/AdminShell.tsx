@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Bell,
   BookOpenText,
+  ChevronDown,
   FileText,
   GalleryHorizontalEnd,
   Home,
@@ -25,16 +26,37 @@ import {
   UserRoundCog,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { CSSProperties, FormEvent } from "react";
 import { useState } from "react";
 
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
-const NAV_ITEMS = [
+type NavChildItem = {
+  label: string;
+  href: string;
+};
+
+type NavItem = {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  children?: NavChildItem[];
+};
+
+const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Bookings", href: "/admin/bookings", icon: Inbox },
-  { label: "Hajj Enquiries", href: "/admin/hajj-umrah-enquiries", icon: Inbox },
+  {
+    label: "Hajj & Umrah",
+    href: "/admin/hajj-umrah",
+    icon: Inbox,
+    children: [
+      { label: "Page CMS", href: "/admin/hajj-umrah" },
+      { label: "Enquiries", href: "/admin/hajj-umrah-enquiries" },
+    ],
+  },
   { label: "eSIM", href: "/admin/esim/orders", icon: Smartphone },
   { label: "Destinations", href: "/admin/destinations", icon: MapPin },
   { label: "Trips", href: "/admin/trips", icon: Plane },
@@ -215,6 +237,9 @@ function AdminSidebar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    "Hajj & Umrah": pathname.startsWith("/admin/hajj-umrah"),
+  });
 
   async function handleSignOut() {
     await fetch("/api/admin/session", { method: "DELETE" }).catch(() => null);
@@ -275,9 +300,92 @@ function AdminSidebar({
         <div className="grid gap-1.5">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
+            const children = item.children ?? [];
+            const hasChildren = children.length > 0;
+            const childActive = hasChildren
+              ? children.some(
+                  (child) =>
+                    pathname === child.href ||
+                    pathname.startsWith(`${child.href}/`),
+                )
+              : false;
             const isActive =
               pathname === item.href ||
-              (item.href !== "/admin" && pathname.startsWith(`${item.href}/`));
+              (item.href !== "/admin" && pathname.startsWith(`${item.href}/`)) ||
+              childActive;
+            const isSectionOpen =
+              Boolean(openSections[item.label]) || (childActive && !isCollapsed);
+
+            if (hasChildren) {
+              return (
+                <div key={item.href} className="grid gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenSections((current) => ({
+                        ...current,
+                        [item.label]: !isSectionOpen,
+                      }))
+                    }
+                    className={[
+                      "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-extrabold transition",
+                      isCollapsed ? "justify-center px-0" : "",
+                      isActive
+                        ? "bg-brand-navy text-white shadow-[0_14px_30px_rgb(7_23_57/0.22)] dark:bg-brand-sand dark:text-brand-navy"
+                        : "text-brand-brown hover:bg-white hover:text-brand-navy dark:hover:bg-white/10 dark:hover:text-white",
+                    ].join(" ")}
+                    title={isCollapsed ? item.label : undefined}
+                    aria-expanded={isSectionOpen}
+                  >
+                    <Icon aria-hidden="true" className="size-4 shrink-0" />
+                    <span
+                      className={
+                        isCollapsed ? "sr-only" : "min-w-0 flex-1 truncate"
+                      }
+                    >
+                      {item.label}
+                    </span>
+                    {!isCollapsed ? (
+                      <ChevronDown
+                        aria-hidden="true"
+                        className={[
+                          "size-4 shrink-0 transition-transform",
+                          isSectionOpen ? "rotate-180" : "",
+                        ].join(" ")}
+                      />
+                    ) : null}
+                  </button>
+
+                  {isSectionOpen && !isCollapsed ? (
+                    <div className="ml-7 grid gap-1 border-l border-[#d7c5ad] pl-2 dark:border-white/10">
+                      {children.map((child) => {
+                        const isChildActive =
+                          pathname === child.href ||
+                          pathname.startsWith(`${child.href}/`);
+
+                        return (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            onClick={onNavigate}
+                            className={[
+                              "flex min-h-9 items-center rounded-lg px-3 text-xs font-extrabold transition",
+                              isChildActive
+                                ? "bg-brand-sand text-brand-navy"
+                                : "text-brand-brown hover:bg-white hover:text-brand-navy dark:hover:bg-white/10 dark:hover:text-white",
+                            ].join(" ")}
+                          >
+                            <span className="min-w-0 truncate">
+                              {child.label}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            }
 
             return (
               <Link
