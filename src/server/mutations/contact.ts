@@ -124,6 +124,7 @@ async function createHajjUmrahContactSubmission(
       departureCity: data.departureCity,
       nationality: data.nationality,
       travelers: data.travelers,
+      remarks: data.remarks,
     },
   });
 

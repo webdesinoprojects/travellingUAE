@@ -135,13 +135,18 @@ export function HajjUmrahEnquiryForm() {
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="rounded-lg border border-border-soft bg-white/92 p-5 shadow-[0_22px_70px_rgb(7_23_57/0.12)] sm:p-6 lg:p-7 dark:border-white/15 dark:bg-[#080808]/95 dark:shadow-[0_24px_70px_rgb(0_0_0/0.45)]"
+      className="rounded-lg border border-[#e2d2bc] bg-white/95 p-4 shadow-[0_16px_42px_rgb(7_23_57/0.08)] sm:p-5 lg:p-6 dark:border-white/12 dark:bg-[#080808]/92 dark:shadow-[0_18px_48px_rgb(0_0_0/0.32)]"
     >
-      <h2 className="text-center font-serif text-2xl font-semibold text-brand-navy sm:text-3xl dark:text-white">
-        Book Your Pilgrimage
-      </h2>
+      <div className="text-center">
+        <h2 className="font-serif text-2xl font-semibold text-brand-navy sm:text-3xl dark:text-white">
+          Book Your Pilgrimage
+        </h2>
+        <p className="mt-2 text-sm font-semibold leading-6 text-brand-brown dark:text-brand-sand/88">
+          Share your details and the Fly Time team will follow up.
+        </p>
+      </div>
 
-      <div className="mt-7 grid gap-4 sm:grid-cols-2">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-5">
         <Field
           inputId="hajj-name"
           label="Name"
@@ -170,7 +175,7 @@ export function HajjUmrahEnquiryForm() {
           error={errors.phoneCode ?? errors.phoneNumber}
           icon={<Phone aria-hidden="true" />}
         >
-          <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-2">
+          <div className="grid grid-cols-[86px_minmax(0,1fr)] gap-2 sm:grid-cols-[92px_minmax(0,1fr)]">
             <input
               required
               value={form.phoneCode}
@@ -326,7 +331,7 @@ export function HajjUmrahEnquiryForm() {
       <button
         type="submit"
         disabled={status === "submitting"}
-        className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-5 text-sm font-extrabold text-white shadow-[0_16px_34px_rgb(18_63_118/0.22)] transition hover:bg-brand-navy disabled:cursor-not-allowed disabled:opacity-65 dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
+        className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-brand-navy px-5 text-sm font-extrabold text-white shadow-[0_12px_26px_rgb(7_23_57/0.18)] transition hover:bg-brand-blue disabled:cursor-not-allowed disabled:opacity-65 dark:bg-brand-sand dark:text-brand-navy dark:hover:bg-brand-sand/90"
       >
         <Send aria-hidden="true" className="size-4" />
         {status === "submitting" ? "Submitting..." : "Submit"}
@@ -337,7 +342,7 @@ export function HajjUmrahEnquiryForm() {
           className={`mt-4 rounded-lg border px-3 py-2 text-sm font-semibold ${
             status === "success"
               ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-              : "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-200"
+              : "border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-200"
           }`}
           aria-live="polite"
         >
@@ -369,17 +374,21 @@ function Field({
     <div className={className}>
       <label
         htmlFor={inputId}
-        className="mb-2 flex items-center gap-2 text-sm font-extrabold text-brand-navy dark:text-white/92"
+        className="mb-1.5 flex min-w-0 items-center gap-2 text-sm font-extrabold text-brand-navy dark:text-white/92"
       >
-        <span className="shrink-0 text-brand-blue [&>svg]:size-4 dark:text-brand-sand">
+        <span className="shrink-0 text-brand-blue/85 [&>svg]:size-4 dark:text-brand-sand">
           {icon}
         </span>
-        {label}
-        {required ? <span className="text-red-600">*</span> : null}
+        <span className="min-w-0 flex-1">{label}</span>
+        {required ? (
+          <span className="rounded-full bg-brand-sand/35 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-brand-brown dark:bg-white/10 dark:text-brand-sand">
+            Required
+          </span>
+        ) : null}
       </label>
       {children}
       {error ? (
-        <p className="mt-1 text-xs font-bold text-red-600 dark:text-red-300">
+        <p className="mt-1.5 text-xs font-bold text-rose-600 dark:text-rose-300">
           {error}
         </p>
       ) : null}
@@ -388,7 +397,7 @@ function Field({
 }
 
 const inputClassName =
-  "min-h-11 w-full rounded-lg border border-border-soft bg-surface-muted px-3 text-sm font-semibold text-brand-navy outline-none transition placeholder:text-foreground-muted focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-sky/45 aria-[invalid=true]:border-red-500 aria-[invalid=true]:ring-4 aria-[invalid=true]:ring-red-500/10 dark:border-white/12 dark:bg-white/[0.06] dark:text-white dark:placeholder:text-white/42 dark:focus:border-brand-sand dark:focus:bg-white/[0.09] dark:focus:ring-brand-sand/15";
+  "min-h-11 w-full rounded-lg border border-[#ddcbb3] bg-white px-3 text-sm font-semibold text-brand-navy outline-none transition placeholder:text-brand-brown/60 focus:border-brand-blue focus:ring-[3px] focus:ring-brand-sky/32 aria-[invalid=true]:border-rose-400 aria-[invalid=true]:ring-[3px] aria-[invalid=true]:ring-rose-500/10 dark:border-white/12 dark:bg-white/[0.07] dark:text-white dark:placeholder:text-white/42 dark:focus:border-brand-sand dark:focus:bg-white/[0.09] dark:focus:ring-brand-sand/15";
 
 function normalizeDialingCode(value: string) {
   const cleaned = value.replace(/[^\d+]/g, "");

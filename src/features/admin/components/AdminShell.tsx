@@ -34,6 +34,7 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Bookings", href: "/admin/bookings", icon: Inbox },
+  { label: "Hajj Enquiries", href: "/admin/hajj-umrah-enquiries", icon: Inbox },
   { label: "eSIM", href: "/admin/esim/orders", icon: Smartphone },
   { label: "Destinations", href: "/admin/destinations", icon: MapPin },
   { label: "Trips", href: "/admin/trips", icon: Plane },
@@ -85,7 +86,7 @@ export function AdminShell({ children }: AdminShellProps) {
         </aside>
 
         <div
-          className="min-w-0 transition-[padding] duration-300 xl:pl-[var(--admin-sidebar-width)]"
+          className="min-w-0 overflow-x-hidden transition-[padding] duration-300 xl:pl-[var(--admin-sidebar-width)]"
           style={
             {
               "--admin-sidebar-width": `${sidebarWidth}px`,
@@ -93,7 +94,7 @@ export function AdminShell({ children }: AdminShellProps) {
           }
         >
           <AdminTopbar onMenu={() => setIsOpen(true)} />
-          <main className="mx-auto w-full max-w-[1580px] px-4 pb-8 pt-4 sm:px-6 lg:px-8">
+          <main className="mx-auto w-full max-w-[1580px] min-w-0 px-4 pb-8 pt-4 sm:px-6 lg:px-8">
             {children}
           </main>
         </div>
@@ -135,8 +136,8 @@ function AdminTopbar({ onMenu }: { onMenu: () => void }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#d7c5ad]/80 bg-[#fffaf2]/80 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-black/78 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-[1580px] items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="mx-auto flex w-full max-w-[1580px] min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
             onClick={onMenu}
@@ -145,11 +146,11 @@ function AdminTopbar({ onMenu }: { onMenu: () => void }) {
           >
             <Menu aria-hidden="true" className="size-5" />
           </button>
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-brown">
               Admin workspace
             </p>
-            <h1 className="font-serif text-xl font-black tracking-tight sm:text-2xl">
+            <h1 className="truncate font-serif text-xl font-black tracking-tight sm:text-2xl">
               Fly Time Operations
             </h1>
           </div>
@@ -158,7 +159,7 @@ function AdminTopbar({ onMenu }: { onMenu: () => void }) {
         <form
           role="search"
           onSubmit={handleSearch}
-          className="hidden min-w-[280px] items-center gap-3 rounded-lg border border-border-soft bg-white px-4 py-3 shadow-sm lg:flex dark:bg-white/10"
+          className="hidden min-w-0 max-w-md flex-1 items-center gap-3 rounded-lg border border-border-soft bg-white px-4 py-3 shadow-sm xl:flex dark:bg-white/10"
         >
           <Search aria-hidden="true" className="size-4 shrink-0 text-brand-brown" />
           <input
@@ -174,7 +175,7 @@ function AdminTopbar({ onMenu }: { onMenu: () => void }) {
           </button>
         </form>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <ThemeToggle />
           <button
             type="button"
@@ -184,7 +185,7 @@ function AdminTopbar({ onMenu }: { onMenu: () => void }) {
             <Bell aria-hidden="true" className="size-5" />
             <span className="absolute right-2 top-2 size-2 rounded-full bg-brand-sand" />
           </button>
-          <div className="hidden items-center gap-3 rounded-lg border border-border-soft bg-white px-3 py-2 dark:bg-white/10 md:flex">
+          <div className="hidden items-center gap-3 rounded-lg border border-border-soft bg-white px-3 py-2 dark:bg-white/10 2xl:flex">
             <div className="grid size-10 place-items-center rounded-lg bg-brand-navy text-sm font-black text-white dark:bg-brand-sand dark:text-brand-navy">
               FT
             </div>
