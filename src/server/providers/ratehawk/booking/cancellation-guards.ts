@@ -85,3 +85,128 @@ export function mapCancellationOutcome(
       return { httpStatus: 500, status: "error" };
   }
 }
+
+/**
+ * Admin-facing view of a hotel booking's cancellation lifecycle — PURE.
+ *
+ * Derives only from `provider_order_status` (never card data, 3DS fields, hashes,
+ * or raw payloads), so it is safe to serialize to the admin client and to test.
+ * Drives the admin detail panel: which action to offer and what result to show.
+ */
+export type HotelCancellationAdminState =
+  | "not_requested" // confirmed: cancel can be requested
+  | "requested_pending" // cancel_pending: a cancel job is in flight/queued
+  | "cancelled" // terminal success
+  | "needs_review" // pending_review: cancel ambiguous/errored, human required
+  | "failed" // terminal failure
+  | "not_cancellable"; // pending/creating/starting/processing/requires_3ds/unknown
+
+export type HotelCancellationView = {
+  adminState: HotelCancellationAdminState;
+  title: string;
+  detail: string;
+  tone: "neutral" | "success" | "warning" | "danger" | "info";
+  /** Offer the "Cancel hotel booking" action (confirmed bookings only). */
+  canRequestCancel: boolean;
+  /** Offer "process the pending cancel job now" (cancel_pending only). */
+  canProcessPending: boolean;
+};
+
+/** Authoritative admin check: only a confirmed order may begin cancellation. */
+export function canAdminRequestHotelCancel(
+  providerOrderStatus: string | null,
+): boolean {
+  return (
+    evaluateCancellationRequest({
+      providerOrderStatus,
+      bookingCustomerEmail: null,
+      requester: { kind: "admin" },
+    }).allowed === true
+  );
+}
+
+export function describeHotelCancellationState(
+  providerOrderStatus: string | null,
+): HotelCancellationView {
+  switch (providerOrderStatus) {
+    case "confirmed":
+      return {
+        adminState: "not_requested",
+        title: "Confirmed",
+        detail: "This booking is confirmed and can be cancelled.",
+        tone: "info",
+        canRequestCancel: true,
+        canProcessPending: false,
+      };
+    case "cancel_pending":
+      return {
+        adminState: "requested_pending",
+        title: "Cancellation in progress",
+        detail:
+          "Cancellation has been requested from RateHawk/ETG and is being processed.",
+        tone: "warning",
+        canRequestCancel: false,
+        canProcessPending: true,
+      };
+    case "cancelled":
+      return {
+        adminState: "cancelled",
+        title: "Cancelled",
+        detail: "RateHawk/ETG confirmed the cancellation of this booking.",
+        tone: "success",
+        canRequestCancel: false,
+        canProcessPending: false,
+      };
+    case "pending_review":
+      return {
+        adminState: "needs_review",
+        title: "Needs manual review",
+        detail:
+          "The cancellation could not be resolved automatically and needs manual review with RateHawk/ETG.",
+        tone: "warning",
+        canRequestCancel: false,
+        canProcessPending: false,
+      };
+    case "failed":
+      return {
+        adminState: "failed",
+        title: "Failed",
+        detail: "This booking is in a failed state and cannot be cancelled here.",
+        tone: "danger",
+        canRequestCancel: false,
+        canProcessPending: false,
+      };
+    default:
+      // pending / creating / starting / processing / requires_3ds / null
+      return {
+        adminState: "not_cancellable",
+        title: "Not cancellable yet",
+        detail:
+          "This booking is not confirmed, so it cannot be cancelled from here.",
+        tone: "neutral",
+        canRequestCancel: false,
+        canProcessPending: false,
+      };
+  }
+}
+
+/** Admin-facing result label for a just-processed cancellation. */
+export function mapProcessedCancellationResult(
+  providerOrderStatus: string | null,
+): { adminState: HotelCancellationAdminState; message: string } {
+  const view = describeHotelCancellationState(providerOrderStatus);
+  switch (view.adminState) {
+    case "cancelled":
+      return { adminState: view.adminState, message: "Cancellation confirmed — booking cancelled." };
+    case "requested_pending":
+      return { adminState: view.adminState, message: "Cancellation is still pending. Try processing again in a moment." };
+    case "needs_review":
+      return { adminState: view.adminState, message: "Cancellation needs manual review." };
+    case "failed":
+      return { adminState: view.adminState, message: "Cancellation failed." };
+    case "not_requested":
+      return { adminState: view.adminState, message: "No cancellation has been requested for this booking." };
+    default:
+      return { adminState: view.adminState, message: "This booking cannot be cancelled." };
+  }
+}

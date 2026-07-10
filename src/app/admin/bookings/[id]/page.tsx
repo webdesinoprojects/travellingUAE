@@ -5,6 +5,10 @@ import { ArrowLeft } from "lucide-react";
 import { requireAdminPageAccess } from "@/server/admin/access";
 import { getSupabaseAdminClient, hasSupabaseAdminEnv } from "@/server/supabase/client";
 import { BookingDetailView } from "@/features/admin/components/BookingDetailView";
+import {
+  HotelCancelPanel,
+  type HotelProviderFields,
+} from "@/features/admin/components/HotelCancelPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +45,7 @@ export default async function BookingDetailPage({
   const result = await supabase
     .from("bookings")
     .select(
-      "id,customer_name,customer_email,customer_phone,travelers_count,travel_date,status,admin_notes,created_at,updated_at",
+      "id,customer_name,customer_email,customer_phone,travelers_count,travel_date,status,admin_notes,created_at,updated_at,provider_order_status,provider_partner_order_id,provider_order_id,provider_order_item_id,provider_result_code,provider_confirmed_at,provider_cancel_requested_at,provider_cancelled_at",
     )
     .eq("id", id)
     .single();
@@ -64,6 +68,22 @@ export default async function BookingDetailPage({
     updatedAt: row.updated_at,
   };
 
+  // A RateHawk/ETG hotel booking is one that has provider order state. Only then
+  // do we show the provider fields + cancellation controls.
+  const providerFields: HotelProviderFields = {
+    providerOrderStatus: row.provider_order_status ?? null,
+    providerPartnerOrderId: row.provider_partner_order_id ?? null,
+    providerOrderId: row.provider_order_id ?? null,
+    providerOrderItemId: row.provider_order_item_id ?? null,
+    providerResultCode: row.provider_result_code ?? null,
+    providerConfirmedAt: row.provider_confirmed_at ?? null,
+    providerCancelRequestedAt: row.provider_cancel_requested_at ?? null,
+    providerCancelledAt: row.provider_cancelled_at ?? null,
+  };
+  const isProviderBooking = Boolean(
+    providerFields.providerPartnerOrderId || providerFields.providerOrderStatus,
+  );
+
   return (
     <div className="grid gap-5">
       <div className="flex items-center gap-3">
@@ -79,6 +99,10 @@ export default async function BookingDetailPage({
       </div>
 
       <BookingDetailView booking={booking} />
+
+      {isProviderBooking ? (
+        <HotelCancelPanel bookingId={booking.id} provider={providerFields} />
+      ) : null}
     </div>
   );
 }
