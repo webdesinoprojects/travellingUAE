@@ -18,6 +18,8 @@ const validModes = new Set([
   "inspect-dump",
   "inspect-region-sample",
   "sync-sample",
+  "sync-targeted",
+  "sync-recent-search-hotels",
   "backfill-regions",
 ]);
 
@@ -29,6 +31,8 @@ if (!validModes.has(mode)) {
       "  node scripts/sync-ratehawk-static-content.mjs inspect-dump",
       "  node scripts/sync-ratehawk-static-content.mjs inspect-region-sample [--limit=20] [--scan-limit=500]",
       "  node scripts/sync-ratehawk-static-content.mjs sync-sample [--limit=10] [--scan-limit=500]",
+      "  node scripts/sync-ratehawk-static-content.mjs sync-targeted --hotel-ids=id1,id2,id3 [--hids=123,456] [--limit=50] [--scan-limit=200000]",
+      "  node scripts/sync-ratehawk-static-content.mjs sync-recent-search-hotels [--limit=50] [--hours=24] [--scan-limit=200000]",
       "  node scripts/sync-ratehawk-static-content.mjs backfill-regions [--insert-missing]",
     ].join("\n"),
   );
@@ -55,6 +59,10 @@ const baseUrl = new URL(
   process.env[`RATEHAWK_${credentialPrefix}_BASE_URL`]?.trim() ||
     (providerEnv === "sandbox" ? "https://api-sandbox.worldota.net" : "https://api.ratehawk.com"),
 ).origin;
+const STATIC_DUMP_ENDPOINT = "/api/b2b/v3/hotel/info/dump/";
+const TARGETED_LIMIT_MAX = 50;
+const TARGETED_SCAN_LIMIT_MAX = 200_000;
+const RECENT_SEARCH_HOURS_MAX = 168;
 
 if (mode === "inspect-dump") {
   await inspectDumpAccess();
@@ -62,6 +70,10 @@ if (mode === "inspect-dump") {
   await inspectRegionSample();
 } else if (mode === "sync-sample") {
   await syncSample();
+} else if (mode === "sync-targeted") {
+  await syncTargeted();
+} else if (mode === "sync-recent-search-hotels") {
+  await syncRecentSearchHotels();
 } else if (mode === "backfill-regions") {
   await backfillRegions();
 } else {
@@ -300,6 +312,292 @@ async function syncSample() {
       2,
     ),
   );
+}
+
+async function syncTargeted() {
+  const parsedTargets = parseExplicitTargets();
+  if (parsedTargets.length === 0) {
+    throw new Error("--hotel-ids or --hids is required for sync-targeted");
+  }
+
+  const limit = numericOption("limit", TARGETED_LIMIT_MAX, 1, TARGETED_LIMIT_MAX);
+  const scanLimit = numericOption("scan-limit", TARGETED_SCAN_LIMIT_MAX, limit, TARGETED_SCAN_LIMIT_MAX);
+  const targets = parsedTargets.slice(0, limit);
+
+  await syncTargetRows({
+    targets,
+    limit,
+    scanLimit,
+    source: "explicit",
+    extraSummary: {
+      requested_target_count: parsedTargets.length,
+      ignored_target_count: Math.max(0, parsedTargets.length - targets.length),
+    },
+  });
+}
+
+async function syncRecentSearchHotels() {
+  const limit = numericOption("limit", TARGETED_LIMIT_MAX, 1, TARGETED_LIMIT_MAX);
+  const hours = numericOption("hours", 24, 1, RECENT_SEARCH_HOURS_MAX);
+  const scanLimit = numericOption("scan-limit", TARGETED_SCAN_LIMIT_MAX, limit, TARGETED_SCAN_LIMIT_MAX);
+  const supabase = createSupabaseClient();
+  const provider = await loadProvider(supabase);
+  const targets = await loadRecentSearchHotelTargets(supabase, provider.id, limit, hours);
+
+  if (targets.length === 0) {
+    console.info(
+      JSON.stringify(
+        {
+          mode,
+          provider_env: providerEnv,
+          base_url: baseUrl,
+          endpoint: STATIC_DUMP_ENDPOINT,
+          language,
+          inventory,
+          source: "recent_search",
+          limit,
+          hours,
+          scan_limit: scanLimit,
+          scanned: 0,
+          matched: 0,
+          upserted: 0,
+          missing_target_ids: [],
+          db_verification: { rows_found: 0, rows: [] },
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  await syncTargetRows({
+    supabase,
+    provider,
+    targets,
+    limit,
+    scanLimit,
+    source: "recent_search",
+    extraSummary: {
+      hours,
+      recent_target_count: targets.length,
+    },
+  });
+}
+
+async function syncTargetRows({
+  supabase: providedSupabase,
+  provider: providedProvider,
+  targets,
+  limit,
+  scanLimit,
+  source,
+  extraSummary = {},
+}) {
+  const supabase = providedSupabase ?? createSupabaseClient();
+  const provider = providedProvider ?? (await loadProvider(supabase));
+  const targetIndex = indexTargets(targets);
+  const dump = await requestDump(STATIC_DUMP_ENDPOINT, { language, inventory });
+  const lines = await openDumpLines(dump.url);
+
+  const matchedRows = [];
+  const matchedTargetLabels = new Set();
+  const matchedHotelIds = new Set();
+  let scanned = 0;
+
+  try {
+    for await (const rawLine of lines) {
+      const value = parseDumpLine(rawLine);
+      if (!value) continue;
+      scanned += 1;
+
+      const matchLabels = labelsForDumpHotel(value, targetIndex);
+      if (matchLabels.length > 0) {
+        const row = mapHotel(value, provider.id, language);
+        if (row) {
+          for (const label of matchLabels) matchedTargetLabels.add(label);
+        }
+        if (row && !matchedHotelIds.has(row.hotel_id)) {
+          matchedRows.push({ row, targetLabels: matchLabels });
+          matchedHotelIds.add(row.hotel_id);
+        }
+      }
+
+      if (matchedRows.length >= limit || matchedTargetLabels.size >= targets.length || scanned >= scanLimit) {
+        break;
+      }
+    }
+  } finally {
+    lines.close();
+  }
+
+  const rowsToWrite = matchedRows.slice(0, limit).map((match) => match.row);
+  let upserted = 0;
+  if (rowsToWrite.length > 0) {
+    const result = await supabase
+      .from("provider_hotel_content")
+      .upsert(rowsToWrite, { onConflict: "provider_id,hotel_id,language" });
+    if (result.error) throw result.error;
+    upserted = rowsToWrite.length;
+  }
+
+  const dbVerification = await verifySampleRows(
+    supabase,
+    provider.id,
+    rowsToWrite.map((row) => row.hotel_id),
+  );
+  const missingTargetIds = targets
+    .map((target) => target.label)
+    .filter((label) => !matchedTargetLabels.has(label));
+
+  console.info(
+    JSON.stringify(
+      {
+        mode,
+        provider_env: providerEnv,
+        base_url: baseUrl,
+        endpoint: STATIC_DUMP_ENDPOINT,
+        language,
+        inventory,
+        source,
+        limit,
+        scan_limit: scanLimit,
+        scanned,
+        target_count: targets.length,
+        matched: matchedRows.length,
+        upserted,
+        missing_target_ids: missingTargetIds,
+        ...extraSummary,
+        match_summary: matchedRows.slice(0, limit).map(({ row, targetLabels }) => ({
+          target_ids: targetLabels,
+          hotel_id: row.hotel_id,
+          hid: row.hid,
+          name: row.name,
+          image_urls_count: Array.isArray(row.image_urls) ? row.image_urls.length : 0,
+          amenities_count: Array.isArray(row.amenities) ? row.amenities.length : 0,
+          has_description: Boolean(row.description),
+          has_policies: Boolean(row.policies && Object.keys(row.policies).length > 0),
+        })),
+        db_verification: dbVerification,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function loadRecentSearchHotelTargets(supabase, providerId, limit, hours) {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const result = await supabase
+    .from("provider_quote_snapshots")
+    .select("provider_reference,safe_payload,created_at")
+    .eq("provider_id", providerId)
+    .eq("service_type", "hotel")
+    .eq("safe_payload->>stage", "serp")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(Math.min(limit * 8, 500));
+  if (result.error) throw result.error;
+
+  const targets = [];
+  const seen = new Set();
+  for (const row of result.data ?? []) {
+    const safePayload = objectOrNull(row.safe_payload) ?? {};
+    const hotelId = targetText(row.provider_reference);
+    const hid = positiveInteger(safePayload.hid);
+    const label = hotelId ?? (hid ? String(hid) : null);
+    if (!label) continue;
+
+    const uniqueKey = hotelId ? `hotel:${hotelId}` : `hid:${hid}`;
+    if (seen.has(uniqueKey)) continue;
+    seen.add(uniqueKey);
+    targets.push({ hotelId, hid, label });
+    if (targets.length >= limit) break;
+  }
+
+  return targets;
+}
+
+function parseExplicitTargets() {
+  const targets = [];
+  const seen = new Set();
+
+  for (const hotelId of optionList("hotel-ids")) {
+    const normalized = targetText(hotelId);
+    if (!normalized) throw new Error(`Invalid --hotel-ids value: ${hotelId}`);
+    const key = `hotel:${normalized}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({ hotelId: normalized, hid: null, label: normalized });
+  }
+
+  for (const hidValue of optionList("hids")) {
+    const hid = positiveInteger(hidValue);
+    if (!hid) throw new Error(`Invalid --hids value: ${hidValue}`);
+    const key = `hid:${hid}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({ hotelId: null, hid, label: String(hid) });
+  }
+
+  return targets;
+}
+
+function indexTargets(targets) {
+  const indexed = new Map();
+  for (const target of targets) {
+    for (const identifier of targetIdentifiers(target)) {
+      const labels = indexed.get(identifier) ?? new Set();
+      labels.add(target.label);
+      indexed.set(identifier, labels);
+    }
+  }
+  return indexed;
+}
+
+function labelsForDumpHotel(value, targetIndex) {
+  const labels = new Set();
+  for (const identifier of dumpHotelIdentifiers(value)) {
+    const matched = targetIndex.get(identifier);
+    if (!matched) continue;
+    for (const label of matched) labels.add(label);
+  }
+  return Array.from(labels);
+}
+
+function targetIdentifiers(target) {
+  const identifiers = [];
+  if (target.hotelId) identifiers.push(target.hotelId);
+  if (target.hid) identifiers.push(String(target.hid));
+  if (target.label) identifiers.push(target.label);
+  return Array.from(new Set(identifiers));
+}
+
+function dumpHotelIdentifiers(value) {
+  const record = objectOrNull(value);
+  if (!record) return [];
+  const identifiers = [];
+  const hotelId = targetText(record.id);
+  const hid = positiveInteger(record.hid);
+  if (hotelId) identifiers.push(hotelId);
+  if (hid) identifiers.push(String(hid));
+  return identifiers;
+}
+
+function optionList(name) {
+  const raw = optionValue(name);
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function targetText(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 160) return null;
+  return /^[A-Za-z0-9._:-]+$/.test(normalized) ? normalized : null;
 }
 
 /** Read back the sample rows and return sanitized presence/shape checks only. */
