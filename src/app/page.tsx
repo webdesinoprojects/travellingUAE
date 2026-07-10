@@ -1,9 +1,11 @@
+import { EsimPromoSection } from "@/components/home/EsimPromoSection";
 import { Hero } from "@/components/home/Hero";
 import { PackageBento } from "@/components/home/PackageBento";
 import { ServicesStrip } from "@/components/home/ServicesStrip";
 import { SmartExclusives } from "@/components/home/SmartExclusives";
 import { Testimonials } from "@/components/home/Testimonials";
 import { SiteFooter } from "@/components/layout/SiteFooter";
+import { getEsimPromoContent } from "@/server/public/esim-promo";
 import { getPublicHomeContent } from "@/server/public/home";
 import {
   getCurrentPublicLocale,
@@ -69,9 +71,10 @@ function getInitialService(service?: string | string[]): SearchServiceKey {
 
 export default async function Home({ searchParams }: HomeProps) {
   const params = await searchParams;
-  const [homeContent, currentLocale] = await Promise.all([
+  const [homeContent, currentLocale, esimPromo] = await Promise.all([
     getPublicHomeContent(),
     getCurrentPublicLocale(),
+    getEsimPromoContent(),
   ]);
   const [homeTranslations, commonTranslations] = await Promise.all([
     getPublicTranslations(currentLocale.code, "home"),
@@ -160,6 +163,7 @@ export default async function Home({ searchParams }: HomeProps) {
             section={homeContent.servicesSection}
           />
         ) : null}
+        <EsimPromoSection content={esimPromo} />
         {homeContent.testimonials.length > 0 ? (
           <Testimonials
             testimonials={homeContent.testimonials}
