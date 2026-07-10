@@ -5,16 +5,30 @@ import { createZstdDecompress } from "node:zlib";
 
 import { createClient } from "@supabase/supabase-js";
 
+import {
+  mapHotel,
+  mapHotelRegionBackfill,
+} from "./ratehawk-static-content-mapping.mjs";
+
 const mode = process.argv[2];
 const options = parseOptions(process.argv.slice(3));
-const validModes = new Set(["full", "incremental", "inspect-region-sample", "backfill-regions"]);
+const validModes = new Set([
+  "full",
+  "incremental",
+  "inspect-dump",
+  "inspect-region-sample",
+  "sync-sample",
+  "backfill-regions",
+]);
 
 if (!validModes.has(mode)) {
   throw new Error(
     [
       "Usage:",
       "  node scripts/sync-ratehawk-static-content.mjs <full|incremental> [--resume]",
+      "  node scripts/sync-ratehawk-static-content.mjs inspect-dump",
       "  node scripts/sync-ratehawk-static-content.mjs inspect-region-sample [--limit=20] [--scan-limit=500]",
+      "  node scripts/sync-ratehawk-static-content.mjs sync-sample [--limit=10] [--scan-limit=500]",
       "  node scripts/sync-ratehawk-static-content.mjs backfill-regions [--insert-missing]",
     ].join("\n"),
   );
@@ -26,17 +40,28 @@ const resume = options.has("resume");
 const insertMissing = options.has("insert-missing");
 const language = optionValue("language") ?? process.env.RATEHAWK_STATIC_LANGUAGE?.trim() ?? "en";
 const inventory = optionValue("inventory") ?? process.env.RATEHAWK_STATIC_INVENTORY?.trim() ?? "preferable";
-const providerEnv = process.env.RATEHAWK_ENV?.trim().toLowerCase() || "test";
+// Env resolution: RATEHAWK_STATIC_ENV overrides, else the project-wide
+// RATEHAWK_ENV, else "test". Never defaults to "prod" (this project has no
+// RATEHAWK_PROD_* creds), so a test-configured project uses its TEST creds/base
+// (api.ratehawk.com) without forcing missing PROD envs. Sandbox stays isolated.
+const providerEnv =
+  (process.env.RATEHAWK_STATIC_ENV?.trim() ||
+    process.env.RATEHAWK_ENV?.trim() ||
+    "test").toLowerCase();
 const credentialPrefix = providerEnv === "prod" ? "PROD" : providerEnv === "sandbox" ? "SANDBOX" : "TEST";
 const keyId = requiredEnv(`RATEHAWK_${credentialPrefix}_KEY_ID`);
 const apiKey = requiredEnv(`RATEHAWK_${credentialPrefix}_API_KEY`);
 const baseUrl = new URL(
   process.env[`RATEHAWK_${credentialPrefix}_BASE_URL`]?.trim() ||
-    (providerEnv === "sandbox" ? "https://api-sandbox.worldota.net" : "https://api.worldota.net"),
+    (providerEnv === "sandbox" ? "https://api-sandbox.worldota.net" : "https://api.ratehawk.com"),
 ).origin;
 
-if (mode === "inspect-region-sample") {
+if (mode === "inspect-dump") {
+  await inspectDumpAccess();
+} else if (mode === "inspect-region-sample") {
   await inspectRegionSample();
+} else if (mode === "sync-sample") {
+  await syncSample();
 } else if (mode === "backfill-regions") {
   await backfillRegions();
 } else {
@@ -112,6 +137,30 @@ async function syncStaticContent(syncMode) {
   }
 }
 
+async function inspectDumpAccess() {
+  const result = await requestDumpMetadata("/api/b2b/v3/hotel/info/dump/", { language, inventory });
+  console.info(
+    JSON.stringify(
+      {
+        mode,
+        provider_env: providerEnv,
+        base_url: baseUrl,
+        endpoint: "/api/b2b/v3/hotel/info/dump/",
+        language,
+        inventory,
+        http_status: result.httpStatus,
+        provider_status: result.providerStatus,
+        provider_error: result.providerError,
+        dump_url_returned: Boolean(result.url),
+        dump_url_host: result.url ? new URL(result.url).host : null,
+        last_update_returned: Boolean(result.lastUpdate),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 async function inspectRegionSample() {
   const limit = numericOption("limit", 20, 1, 200);
   const scanLimit = numericOption("scan-limit", Math.max(limit * 25, 100), limit, 50_000);
@@ -170,6 +219,127 @@ async function inspectRegionSample() {
       2,
     ),
   );
+}
+
+/**
+ * Bounded sample sync: stream the dump, upsert AT MOST `limit` (hard-capped at
+ * 10) valid hotel rows into provider_hotel_content, then read them back and
+ * print a sanitized verification summary. Never runs a full or incremental sync
+ * and never creates a provider_content_sync_runs row. Prints only counts and
+ * presence/shape booleans - never full descriptions, policies, or raw payloads,
+ * credentials, or signed dump URLs.
+ */
+async function syncSample() {
+  // Hard cap: the sample never writes more than 10 rows regardless of input.
+  const limit = numericOption("limit", 10, 1, 10);
+  const scanLimit = numericOption("scan-limit", 500, limit, 50_000);
+
+  const supabase = createSupabaseClient();
+  const provider = await loadProvider(supabase);
+  const dump = await requestDump("/api/b2b/v3/hotel/info/dump/", { language, inventory });
+  const lines = await openDumpLines(dump.url);
+
+  const rows = [];
+  let scanned = 0;
+
+  for await (const rawLine of lines) {
+    const value = parseDumpLine(rawLine);
+    if (!value) continue;
+    scanned += 1;
+
+    const row = mapHotel(value, provider.id, language);
+    if (row) rows.push(row);
+
+    // Stop as soon as we have enough valid hotels or hit the scan ceiling.
+    if (rows.length >= limit || scanned >= scanLimit) break;
+  }
+
+  const toWrite = rows.slice(0, limit);
+  let upserted = 0;
+  if (toWrite.length > 0) {
+    const result = await supabase
+      .from("provider_hotel_content")
+      .upsert(toWrite, { onConflict: "provider_id,hotel_id,language" });
+    if (result.error) throw result.error;
+    upserted = toWrite.length;
+  }
+
+  const sampleSummary = toWrite.map((row) => ({
+    hotel_id: row.hotel_id,
+    name: row.name,
+    image_urls_count: Array.isArray(row.image_urls) ? row.image_urls.length : 0,
+    amenities_count: Array.isArray(row.amenities) ? row.amenities.length : 0,
+    has_description: Boolean(row.description),
+    has_policies: Boolean(row.policies && Object.keys(row.policies).length > 0),
+  }));
+
+  // Step D: read the just-written rows back and verify shape from the DB.
+  const dbVerification = await verifySampleRows(
+    supabase,
+    provider.id,
+    toWrite.map((row) => row.hotel_id),
+  );
+
+  console.info(
+    JSON.stringify(
+      {
+        mode,
+        provider_env: providerEnv,
+        base_url: baseUrl,
+        endpoint: "/api/b2b/v3/hotel/info/dump/",
+        language,
+        inventory,
+        limit,
+        scan_limit: scanLimit,
+        scanned,
+        upserted,
+        sample_summary: sampleSummary,
+        db_verification: dbVerification,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+/** Read back the sample rows and return sanitized presence/shape checks only. */
+async function verifySampleRows(supabase, providerId, hotelIds) {
+  if (hotelIds.length === 0) return { rows_found: 0, rows: [] };
+
+  const result = await supabase
+    .from("provider_hotel_content")
+    .select(
+      "hotel_id,name,address,star_rating,latitude,longitude,region_id,region_name,region_country_code,primary_image_url,image_urls,amenities,description,policies",
+    )
+    .eq("provider_id", providerId)
+    .eq("language", language)
+    .in("hotel_id", hotelIds);
+  if (result.error) throw result.error;
+
+  const rows = (result.data ?? []).map((row) => {
+    const imageUrls = Array.isArray(row.image_urls) ? row.image_urls : null;
+    const amenities = Array.isArray(row.amenities) ? row.amenities : null;
+    return {
+      hotel_id: row.hotel_id,
+      image_urls_is_array: Array.isArray(row.image_urls),
+      image_urls_count: imageUrls ? imageUrls.length : 0,
+      image_urls_within_max_15: imageUrls ? imageUrls.length <= 15 : true,
+      primary_image_url_set_when_images:
+        !imageUrls || imageUrls.length === 0 ? true : Boolean(row.primary_image_url),
+      amenities_is_array: Array.isArray(row.amenities),
+      amenities_count: amenities ? amenities.length : 0,
+      description_ok: row.description === null || typeof row.description === "string",
+      policies_is_object:
+        row.policies !== null && typeof row.policies === "object" && !Array.isArray(row.policies),
+      has_name: Boolean(row.name),
+      has_address: Boolean(row.address),
+      has_star_rating: row.star_rating !== null && row.star_rating !== undefined,
+      has_coords: row.latitude !== null && row.longitude !== null,
+      has_region: Boolean(row.region_id || row.region_name || row.region_country_code),
+    };
+  });
+
+  return { rows_found: rows.length, rows };
 }
 
 async function backfillRegions() {
@@ -234,6 +404,19 @@ async function backfillRegions() {
 }
 
 async function requestDump(path, body) {
+  const result = await requestDumpMetadata(path, body);
+  if (!result.ok || !result.url) {
+    throw new Error(`Hotel dump request failed with HTTP ${result.httpStatus}`);
+  }
+  const parsed = new URL(result.url);
+  if (parsed.protocol !== "https:") throw new Error("Hotel dump URL must use HTTPS");
+  return {
+    url: parsed.toString(),
+    lastUpdate: result.lastUpdate,
+  };
+}
+
+async function requestDumpMetadata(path, body) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: {
@@ -248,13 +431,12 @@ async function requestDump(path, body) {
   const payload = await response.json().catch(() => null);
   const url = payload?.data?.url;
   const lastUpdate = payload?.data?.last_update;
-  if (!response.ok || payload?.status !== "ok" || typeof url !== "string") {
-    throw new Error(`Hotel dump request failed with HTTP ${response.status}`);
-  }
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:") throw new Error("Hotel dump URL must use HTTPS");
   return {
-    url: parsed.toString(),
+    ok: response.ok && payload?.status === "ok" && typeof url === "string",
+    httpStatus: response.status,
+    providerStatus: typeof payload?.status === "string" ? payload.status : null,
+    providerError: typeof payload?.error === "string" ? payload.error : null,
+    url: typeof url === "string" ? url : null,
     lastUpdate: typeof lastUpdate === "string" ? lastUpdate : null,
   };
 }
@@ -338,87 +520,15 @@ function createSupabaseClient() {
   );
 }
 
-function mapHotel(value, providerId, locale) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const hotelId = text(value.id) || (positiveInteger(value.hid) ? String(positiveInteger(value.hid)) : null);
-  const name = text(value.name);
-  if (!hotelId || !name) return null;
-
-  const region = readRegion(value);
-  const images = Array.isArray(value.images_ext)
-    ? value.images_ext.map((entry) => normalizeImage(entry?.url)).filter(Boolean).slice(0, 30)
-    : Array.isArray(value.images)
-      ? value.images.map(normalizeImage).filter(Boolean).slice(0, 30)
-      : [];
-
-  return {
-    provider_id: providerId,
-    hotel_id: hotelId,
-    hid: positiveInteger(value.hid),
-    region_id: region.id,
-    region_name: region.name,
-    region_country_code: region.countryCode,
-    region_type: region.type,
-    language: locale,
-    name,
-    address: text(value.address),
-    star_rating: finite(value.star_rating),
-    latitude: finite(value.latitude),
-    longitude: finite(value.longitude),
-    primary_image_url: images[0] ?? null,
-    // Keep the relational search index lean. ETG internal content such as the
-    // full image gallery and descriptions is display-only and must not be
-    // indexed; storing it for every hotel also exceeds small Postgres plans.
-    image_urls: [],
-    amenities: [],
-    policies: value.metapolicy_struct && typeof value.metapolicy_struct === "object" ? value.metapolicy_struct : {},
-    description: null,
-    provider_updated_at: text(value.updated_at),
-    synced_at: new Date().toISOString(),
-  };
-}
-
-function mapHotelRegionBackfill(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const hotelId = text(value.id) || (positiveInteger(value.hid) ? String(positiveInteger(value.hid)) : null);
-  if (!hotelId) return null;
-  const region = readRegion(value);
-  if (!region.id && !region.name && !region.countryCode && !region.type) return null;
-
-  return {
-    hotel_id: hotelId,
-    region_id: region.id,
-    region_name: region.name,
-    region_country_code: region.countryCode,
-    region_type: region.type,
-  };
-}
-
-function readRegion(value) {
-  const region = objectOrNull(value.region);
-  return {
-    id: positiveInteger(region?.id) ?? positiveInteger(value.region_id),
-    name: text(region?.name) ?? text(value.region_name),
-    countryCode: countryCode(region?.country_code) ?? countryCode(value.country_code),
-    type: text(region?.type) ?? text(value.region_type),
-  };
-}
-
-function normalizeImage(value) {
-  const raw = text(value);
-  if (!raw) return null;
-  try {
-    const url = new URL(raw.replace("{size}", "640x400"));
-    return url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
 function parseDumpLine(rawLine) {
   const line = rawLine.trim().replace(/,$/, "");
   if (!line || line === "[" || line === "]") return null;
   return JSON.parse(line);
+}
+
+function positiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function objectOrNull(value) {
@@ -427,23 +537,6 @@ function objectOrNull(value) {
 
 function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function countryCode(value) {
-  const raw = text(value);
-  if (!raw) return null;
-  const normalized = raw.toUpperCase();
-  return /^[A-Z]{2}$/.test(normalized) ? normalized : null;
-}
-
-function finite(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function positiveInteger(value) {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function requiredEnv(name) {
