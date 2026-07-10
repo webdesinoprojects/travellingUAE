@@ -13,6 +13,7 @@ import {
 } from "@/server/supabase/client";
 import type { PublicCmsPage } from "@/types/cms";
 import type {
+  PublicFooterNewsletter,
   PublicFooterSettings,
   PublicFooterSocialLink,
   SocialPlatform,
@@ -312,6 +313,13 @@ function normalizeSlug(slug: string) {
 
 const FOOTER_SECTION_KEY = "home.footer";
 
+const FALLBACK_FOOTER_NEWSLETTER: PublicFooterNewsletter = {
+  title: "Boarding notes before the crowd.",
+  description: "Fly Time updates",
+  placeholder: "Enter email",
+  buttonLabel: "Subscribe",
+};
+
 const DEV_FALLBACK_FOOTER_SETTINGS: PublicFooterSettings = {
   contact: {
     tagline:
@@ -321,11 +329,13 @@ const DEV_FALLBACK_FOOTER_SETTINGS: PublicFooterSettings = {
     email: "hello@flytime.example",
   },
   socialLinks: [],
+  newsletter: FALLBACK_FOOTER_NEWSLETTER,
 };
 
 const EMPTY_FOOTER_SETTINGS: PublicFooterSettings = {
   contact: { tagline: "", address: "", phone: "", email: "" },
   socialLinks: [],
+  newsletter: FALLBACK_FOOTER_NEWSLETTER,
 };
 
 type DbSiteSectionPayload = {
@@ -396,7 +406,38 @@ function mapFooterPayload(payload: Record<string, unknown>): PublicFooterSetting
         }))
     : [];
 
-  return { contact, socialLinks };
+  const newsletterRaw =
+    payload.newsletter &&
+    typeof payload.newsletter === "object" &&
+    !Array.isArray(payload.newsletter)
+      ? (payload.newsletter as Record<string, unknown>)
+      : null;
+  const newsletter: PublicFooterNewsletter = {
+    title: readFooterText(newsletterRaw?.title, FALLBACK_FOOTER_NEWSLETTER.title),
+    description: readFooterText(
+      newsletterRaw?.description,
+      FALLBACK_FOOTER_NEWSLETTER.description,
+    ),
+    placeholder: readFooterText(
+      newsletterRaw?.placeholder,
+      FALLBACK_FOOTER_NEWSLETTER.placeholder,
+    ),
+    buttonLabel: readFooterText(
+      newsletterRaw?.buttonLabel,
+      FALLBACK_FOOTER_NEWSLETTER.buttonLabel,
+    ),
+  };
+
+  return { contact, socialLinks, newsletter };
+}
+
+function readFooterText(value: unknown, fallback: string) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || fallback;
 }
 
 function mapNavigationRows(rows: DbNavigationItem[]): NavItem[] {

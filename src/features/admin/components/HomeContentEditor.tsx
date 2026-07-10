@@ -1,13 +1,22 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   CheckCircle2,
+  ImageIcon,
   Layers3,
   Loader2,
   Plus,
   Save,
+  Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -17,6 +26,7 @@ import type {
   AdminHomeCollectionItem,
   AdminHomeContent,
   AdminHomeMediaOption,
+  AdminHomeSectionCopy,
   AdminHomeService,
   AdminHomeTestimonial,
 } from "@/types/home";
@@ -24,7 +34,15 @@ import type { TravelIconKey } from "@/types/travel";
 
 type HomeContentEditorProps = {
   initialContent: AdminHomeContent;
+  view?: HomeContentEditorView;
 };
+
+export type HomeContentEditorView =
+  | "all"
+  | "services"
+  | "routes"
+  | "picks"
+  | "testimonials";
 
 type MutationState = {
   state: "idle" | "saving" | "saved" | "error";
@@ -49,7 +67,55 @@ const iconOptions: TravelIconKey[] = [
   "sim",
 ];
 
-export function HomeContentEditor({ initialContent }: HomeContentEditorProps) {
+const collectionDefinitions = [
+  {
+    type: "flytime_picks" as const,
+    slug: "fly-time-picks",
+    title: "Fly Time Picks",
+    eyebrow: "Handpicked Deals",
+  },
+  {
+    type: "route_board" as const,
+    slug: "routes-people-ask-for",
+    title: "Routes People Ask For",
+    eyebrow: "Holiday Lanes",
+  },
+];
+
+const viewMeta: Record<HomeContentEditorView, { eyebrow: string; title: string; description: string }> = {
+  all: {
+    eyebrow: "Homepage content",
+    title: "Published sections and cards",
+    description: "Published changes appear on the homepage after save.",
+  },
+  services: {
+    eyebrow: "What We Handle",
+    title: "Service section and cards",
+    description: "Edit the homepage service heading and the cards under What We Handle.",
+  },
+  routes: {
+    eyebrow: "Routes People Ask For",
+    title: "Route board cards",
+    description: "Edit the homepage route section heading, images, prices, links and card layout.",
+  },
+  picks: {
+    eyebrow: "Fly Time Picks",
+    title: "Picked deal cards",
+    description: "Edit the homepage offers rail, pricing copy, images and destination links.",
+  },
+  testimonials: {
+    eyebrow: "Traveler Voices",
+    title: "Story cards",
+    description: "Edit the traveler voices heading and testimonial cards shown on the homepage.",
+  },
+};
+
+type MediaOptionSort = "latest" | "az" | "za";
+
+export function HomeContentEditor({
+  initialContent,
+  view = "all",
+}: HomeContentEditorProps) {
   const router = useRouter();
   const [content, setContent] = useState(initialContent);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -111,26 +177,33 @@ export function HomeContentEditor({ initialContent }: HomeContentEditorProps) {
   }
 
   const saving = mutation.state === "saving";
-  const missingCollections = ([
-    {
-      type: "flytime_picks" as const,
-      slug: "fly-time-picks",
-      title: "Fly Time Picks",
-      eyebrow: "Handpicked Deals",
-    },
-    {
-      type: "route_board" as const,
-      slug: "routes-people-ask-for",
-      title: "Routes People Ask For",
-      eyebrow: "Holiday Lanes",
-    },
-  ]).filter(
+  const expectedCollections = collectionDefinitions.filter((collection) => {
+    if (view === "routes") return collection.type === "route_board";
+    if (view === "picks") return collection.type === "flytime_picks";
+    return view === "all";
+  });
+  const missingCollections = expectedCollections.filter(
     (expected) =>
       !content.collections.some(
         (collection) =>
           collection.type === expected.type && collection.status !== "archived",
       ),
   );
+  const sections = content.sections.filter((section) => {
+    if (view === "services") return section.key === "services";
+    if (view === "testimonials") return section.key === "testimonials";
+    return view === "all";
+  });
+  const collections = content.collections.filter((collection) => {
+    if (view === "routes") return collection.type === "route_board";
+    if (view === "picks") return collection.type === "flytime_picks";
+    return view === "all";
+  });
+  const showSections = sections.length > 0;
+  const showCollections = collections.length > 0 || missingCollections.length > 0;
+  const showServices = view === "all" || view === "services";
+  const showTestimonials = view === "all" || view === "testimonials";
+  const meta = viewMeta[view];
 
   return (
     <section className="grid gap-5">
@@ -138,9 +211,12 @@ export function HomeContentEditor({ initialContent }: HomeContentEditorProps) {
         <div>
           <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-brand-brown">
             <Layers3 aria-hidden="true" className="size-4" />
-            Homepage content
+            {meta.eyebrow}
           </p>
-          <h2 className="mt-2 text-xl font-black">Published sections and cards</h2>
+          <h2 className="mt-2 text-xl font-black">{meta.title}</h2>
+          <p className="mt-1 text-sm font-semibold text-brand-brown">
+            {meta.description}
+          </p>
         </div>
         <div
           role="status"
@@ -164,48 +240,76 @@ export function HomeContentEditor({ initialContent }: HomeContentEditorProps) {
         </div>
       </header>
 
-      <EditorGroup title="Section headings" description="Headings for the two homepage card collections.">
-        <div className="grid gap-3 lg:grid-cols-2">
-          {content.collections.map((collection) => (
-            <CollectionForm
-              key={`${collection.id}-${refreshKey}`}
-              collection={collection}
-              disabled={saving}
-              active={mutation.target === collection.id}
-              onSubmit={(event) =>
-                saveForm(
-                  event,
-                  collection.id,
-                  `/api/admin/home/content/collections/${collection.id}`,
-                  collectionPayload,
-                )
-              }
-            />
-          ))}
-          {missingCollections.map((collection) => (
-            <NewCollectionForm
-              key={collection.type}
-              collection={collection}
-              disabled={saving}
-              onSubmit={(event) =>
-                saveForm(
-                  event,
-                  `new-${collection.type}`,
-                  "/api/admin/home/content/collections",
-                  (data) => ({
-                    ...collectionPayload(data),
-                    slug: collection.slug,
-                    type: collection.type,
-                  }),
-                  "POST",
-                )
-              }
-            />
-          ))}
-        </div>
-      </EditorGroup>
+      {showSections ? (
+        <EditorGroup
+          title={view === "all" ? "Homepage section copy" : "Section copy"}
+          description="Headings for homepage areas that are not card collections."
+        >
+          <div className="grid gap-3 lg:grid-cols-2">
+            {sections.map((section) => (
+              <SectionCopyForm
+                key={`${section.key}-${refreshKey}`}
+                section={section}
+                disabled={saving}
+                active={mutation.target === section.key}
+                onSubmit={(event) =>
+                  saveForm(
+                    event,
+                    section.key,
+                    `/api/admin/home/content/sections/${section.key}`,
+                    sectionCopyPayload,
+                  )
+                }
+              />
+            ))}
+          </div>
+        </EditorGroup>
+      ) : null}
 
-      {content.collections.map((collection) => (
+      {showCollections ? (
+        <EditorGroup title="Section heading" description="Heading and intro text for this homepage card collection.">
+          <div className="grid gap-3 lg:grid-cols-2">
+            {collections.map((collection) => (
+              <CollectionForm
+                key={`${collection.id}-${refreshKey}`}
+                collection={collection}
+                disabled={saving}
+                active={mutation.target === collection.id}
+                onSubmit={(event) =>
+                  saveForm(
+                    event,
+                    collection.id,
+                    `/api/admin/home/content/collections/${collection.id}`,
+                    collectionPayload,
+                  )
+                }
+              />
+            ))}
+            {missingCollections.map((collection) => (
+              <NewCollectionForm
+                key={collection.type}
+                collection={collection}
+                disabled={saving}
+                onSubmit={(event) =>
+                  saveForm(
+                    event,
+                    `new-${collection.type}`,
+                    "/api/admin/home/content/collections",
+                    (data) => ({
+                      ...collectionPayload(data),
+                      slug: collection.slug,
+                      type: collection.type,
+                    }),
+                    "POST",
+                  )
+                }
+              />
+            ))}
+          </div>
+        </EditorGroup>
+      ) : null}
+
+      {collections.map((collection) => (
         <EditorGroup
           key={collection.id}
           title={collection.title}
@@ -264,91 +368,95 @@ export function HomeContentEditor({ initialContent }: HomeContentEditorProps) {
         </EditorGroup>
       ))}
 
-      <EditorGroup title="Service desk cards" description="Published service tiles and enquiry entry points.">
-        <div className="grid gap-3 xl:grid-cols-2">
-          {content.services.map((service) => (
-            <ServiceForm
-              key={`${service.id}-${refreshKey}`}
-              service={service}
-              media={content.media}
-              disabled={saving}
-              active={mutation.target === service.id}
-              onSubmit={(event) =>
-                saveForm(
-                  event,
-                  service.id,
-                  `/api/admin/home/content/services/${service.id}`,
-                  servicePayload,
-                )
-              }
-              onArchive={() =>
-                void mutate(
-                  service.id,
-                  "DELETE",
-                  `/api/admin/home/content/services/${service.id}`,
-                )
-              }
-            />
-          ))}
-        </div>
-        <NewServiceForm
-          key={`new-service-${refreshKey}`}
-          media={content.media}
-          disabled={saving}
-          onSubmit={(event) =>
-            saveForm(
-              event,
-              "new-service",
-              "/api/admin/home/content/services",
-              servicePayload,
-              "POST",
-            )
-          }
-        />
-      </EditorGroup>
+      {showServices ? (
+        <EditorGroup title="Service desk cards" description="Published service tiles and enquiry entry points.">
+          <div className="grid gap-3 xl:grid-cols-2">
+            {content.services.map((service) => (
+              <ServiceForm
+                key={`${service.id}-${refreshKey}`}
+                service={service}
+                media={content.media}
+                disabled={saving}
+                active={mutation.target === service.id}
+                onSubmit={(event) =>
+                  saveForm(
+                    event,
+                    service.id,
+                    `/api/admin/home/content/services/${service.id}`,
+                    servicePayload,
+                  )
+                }
+                onArchive={() =>
+                  void mutate(
+                    service.id,
+                    "DELETE",
+                    `/api/admin/home/content/services/${service.id}`,
+                  )
+                }
+              />
+            ))}
+          </div>
+          <NewServiceForm
+            key={`new-service-${refreshKey}`}
+            media={content.media}
+            disabled={saving}
+            onSubmit={(event) =>
+              saveForm(
+                event,
+                "new-service",
+                "/api/admin/home/content/services",
+                servicePayload,
+                "POST",
+              )
+            }
+          />
+        </EditorGroup>
+      ) : null}
 
-      <EditorGroup title="Traveler stories" description="Testimonials presented on the homepage.">
-        <div className="grid gap-3 xl:grid-cols-2">
-          {content.testimonials.map((testimonial) => (
-            <TestimonialForm
-              key={`${testimonial.id}-${refreshKey}`}
-              testimonial={testimonial}
-              media={content.media}
-              disabled={saving}
-              active={mutation.target === testimonial.id}
-              onSubmit={(event) =>
-                saveForm(
-                  event,
-                  testimonial.id,
-                  `/api/admin/home/content/testimonials/${testimonial.id}`,
-                  testimonialPayload,
-                )
-              }
-              onArchive={() =>
-                void mutate(
-                  testimonial.id,
-                  "DELETE",
-                  `/api/admin/home/content/testimonials/${testimonial.id}`,
-                )
-              }
-            />
-          ))}
-        </div>
-        <NewTestimonialForm
-          key={`new-testimonial-${refreshKey}`}
-          media={content.media}
-          disabled={saving}
-          onSubmit={(event) =>
-            saveForm(
-              event,
-              "new-testimonial",
-              "/api/admin/home/content/testimonials",
-              testimonialPayload,
-              "POST",
-            )
-          }
-        />
-      </EditorGroup>
+      {showTestimonials ? (
+        <EditorGroup title="Traveler stories" description="Testimonials presented on the homepage.">
+          <div className="grid gap-3 xl:grid-cols-2">
+            {content.testimonials.map((testimonial) => (
+              <TestimonialForm
+                key={`${testimonial.id}-${refreshKey}`}
+                testimonial={testimonial}
+                media={content.media}
+                disabled={saving}
+                active={mutation.target === testimonial.id}
+                onSubmit={(event) =>
+                  saveForm(
+                    event,
+                    testimonial.id,
+                    `/api/admin/home/content/testimonials/${testimonial.id}`,
+                    testimonialPayload,
+                  )
+                }
+                onArchive={() =>
+                  void mutate(
+                    testimonial.id,
+                    "DELETE",
+                    `/api/admin/home/content/testimonials/${testimonial.id}`,
+                  )
+                }
+              />
+            ))}
+          </div>
+          <NewTestimonialForm
+            key={`new-testimonial-${refreshKey}`}
+            media={content.media}
+            disabled={saving}
+            onSubmit={(event) =>
+              saveForm(
+                event,
+                "new-testimonial",
+                "/api/admin/home/content/testimonials",
+                testimonialPayload,
+                "POST",
+              )
+            }
+          />
+        </EditorGroup>
+      ) : null}
     </section>
   );
 }
@@ -370,6 +478,41 @@ function EditorGroup({
       </div>
       {children}
     </section>
+  );
+}
+
+function SectionCopyForm({
+  section,
+  disabled,
+  active,
+  onSubmit,
+}: {
+  section: AdminHomeSectionCopy;
+  disabled: boolean;
+  active: boolean;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <FormCard onSubmit={onSubmit}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <TextField name="eyebrow" label="Eyebrow" value={section.eyebrow} />
+        <StatusField value={section.status} />
+        <TextField
+          name="title"
+          label="Heading"
+          value={section.title}
+          className="sm:col-span-2"
+          required
+        />
+        <TextField
+          name="description"
+          label="Subtitle"
+          value={section.description}
+          className="sm:col-span-2"
+        />
+      </div>
+      <SaveAction disabled={disabled} active={active} label="Save section copy" />
+    </FormCard>
   );
 }
 
@@ -699,14 +842,59 @@ function MediaField({
   value?: string;
   required?: boolean;
 }) {
+  const [selectedId, setSelectedId] = useState(value);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<MediaOptionSort>("latest");
+  const selected = media.find((item) => item.id === selectedId);
+  const filteredMedia = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const items = normalizedQuery
+      ? media.filter(
+          (item) =>
+            item.label.toLowerCase().includes(normalizedQuery) ||
+            item.imageAlt.toLowerCase().includes(normalizedQuery),
+        )
+      : [...media];
+
+    if (sort === "az") {
+      return items.sort((a, b) => a.label.localeCompare(b.label));
+    }
+
+    if (sort === "za") {
+      return items.sort((a, b) => b.label.localeCompare(a.label));
+    }
+
+    return items;
+  }, [media, query, sort]);
+
+  useEffect(() => {
+    if (!pickerOpen) {
+      return;
+    }
+
+    const originalBodyOverflow = document.body.style.overflow;
+    const originalHtmlOverflow = document.documentElement.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalBodyOverflow;
+      document.documentElement.style.overflow = originalHtmlOverflow;
+    };
+  }, [pickerOpen]);
+
   return (
-    <label className="grid gap-1 text-xs font-bold text-brand-brown">
-      Image asset
+    <div className="grid gap-1 text-xs font-bold text-brand-brown">
+      <span>Image asset</span>
       <select
         name="mediaId"
-        defaultValue={value}
+        value={selectedId}
+        onChange={(event) => setSelectedId(event.target.value)}
         required={required}
-        className="min-h-10 rounded-md border border-[#d7c5ad] bg-white px-3 text-sm font-semibold text-brand-navy outline-none focus:border-brand-blue dark:border-white/10 dark:bg-white/10 dark:text-white"
+        className="sr-only"
+        aria-label="Selected image asset"
       >
         <option value="">No image</option>
         {media.map((item) => (
@@ -715,7 +903,165 @@ function MediaField({
           </option>
         ))}
       </select>
-    </label>
+      <div className="grid gap-2 rounded-md border border-[#d7c5ad] bg-white p-2 dark:border-white/10 dark:bg-white/10">
+        {selected ? (
+          <div className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-3">
+            <span className="relative block aspect-video overflow-hidden rounded-md bg-brand-navy/10">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={selected.imageUrl}
+                alt={selected.imageAlt || selected.label}
+                className="h-full w-full object-cover"
+              />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-black text-brand-navy dark:text-white">
+                {selected.label}
+              </span>
+              <span className="mt-1 block truncate text-[11px] font-bold text-brand-brown">
+                {selected.imageAlt || "Selected media"}
+              </span>
+            </span>
+          </div>
+        ) : (
+          <div className="flex min-h-16 items-center gap-3 rounded-md bg-[#fffaf2] px-3 dark:bg-white/10">
+            <ImageIcon aria-hidden="true" className="size-5 text-brand-brown" />
+            <span className="text-sm font-black text-brand-navy dark:text-white">
+              No image selected
+            </span>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="inline-flex min-h-9 flex-1 items-center justify-center gap-2 rounded-md bg-brand-navy px-3 text-sm font-black text-white dark:bg-brand-sand dark:text-brand-navy"
+          >
+            <ImageIcon aria-hidden="true" className="size-4" />
+            Select image
+          </button>
+          {!required && selectedId ? (
+            <button
+              type="button"
+              onClick={() => setSelectedId("")}
+              className="inline-flex min-h-9 items-center justify-center rounded-md border border-[#d7c5ad] px-3 text-sm font-black text-brand-brown dark:border-white/15 dark:text-brand-sand"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {pickerOpen ? (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50">
+          <button
+            type="button"
+            aria-label="Close media picker backdrop"
+            onClick={() => setPickerOpen(false)}
+            className="absolute inset-0 bg-black/60"
+          />
+          <aside className="absolute inset-y-0 right-0 flex h-full w-full max-w-[620px] flex-col border-l border-[#d7c5ad] bg-white text-brand-navy shadow-2xl dark:border-white/10 dark:bg-[#0d0d0d] dark:text-white">
+            <header className="shrink-0 border-b border-[#d7c5ad] p-5 dark:border-white/10">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-brand-brown">
+                    Media library
+                  </p>
+                  <h3 className="font-serif text-2xl font-black">
+                    Select image asset
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close media picker"
+                  onClick={() => setPickerOpen(false)}
+                  className="grid size-9 place-items-center rounded-lg border border-border-soft bg-white text-brand-navy dark:bg-white/10 dark:text-white"
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              </div>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <form
+                className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]"
+                onSubmit={(event) => event.preventDefault()}
+              >
+                <label className="relative min-w-0">
+                  <span className="sr-only">Search media</span>
+                  <Search
+                    aria-hidden="true"
+                    className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-brand-brown"
+                  />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search media"
+                    className="min-h-11 w-full rounded-lg border border-[#d7c5ad] bg-[#fffaf2] pl-10 pr-3 text-sm font-semibold text-brand-navy outline-none focus:border-brand-blue dark:border-white/10 dark:bg-white/10 dark:text-white"
+                  />
+                </label>
+                <label>
+                  <span className="sr-only">Sort media</span>
+                  <select
+                    value={sort}
+                    onChange={(event) =>
+                      setSort(event.target.value as MediaOptionSort)
+                    }
+                    className="min-h-11 w-full rounded-lg border border-[#d7c5ad] bg-[#fffaf2] px-3 text-sm font-bold text-brand-navy outline-none focus:border-brand-blue dark:border-white/10 dark:bg-white/10 dark:text-white"
+                  >
+                    <option value="latest">Latest</option>
+                    <option value="az">A to Z</option>
+                    <option value="za">Z to A</option>
+                  </select>
+                </label>
+              </form>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {filteredMedia.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(item.id);
+                      setPickerOpen(false);
+                    }}
+                    className={[
+                      "overflow-hidden rounded-lg border bg-[#fffaf2] text-left transition dark:bg-white/10",
+                      selectedId === item.id
+                        ? "border-brand-blue ring-2 ring-brand-blue/25"
+                        : "border-[#d7c5ad] hover:border-brand-blue dark:border-white/10",
+                    ].join(" ")}
+                  >
+                    <span className="relative block aspect-video bg-brand-navy/10">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={item.imageUrl}
+                        alt={item.imageAlt || item.label}
+                        className="h-full w-full object-cover"
+                      />
+                    </span>
+                    <span className="block p-3">
+                      <span className="block truncate text-sm font-black text-brand-navy dark:text-white">
+                        {item.label}
+                      </span>
+                      <span className="mt-1 block truncate text-xs font-bold text-brand-brown">
+                        {item.imageAlt || "Media asset"}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {filteredMedia.length === 0 ? (
+                <p className="mt-5 rounded-lg border border-[#d7c5ad] bg-[#fffaf2] p-4 text-sm font-bold text-brand-brown dark:border-white/10 dark:bg-white/10">
+                  No media matched your search.
+                </p>
+              ) : null}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -853,6 +1199,15 @@ function collectionPayload(data: FormData) {
     description: field(data, "description"),
     status: field(data, "status"),
     sortOrder: field(data, "sortOrder"),
+  };
+}
+
+function sectionCopyPayload(data: FormData) {
+  return {
+    title: field(data, "title"),
+    eyebrow: field(data, "eyebrow"),
+    description: field(data, "description"),
+    status: field(data, "status"),
   };
 }
 

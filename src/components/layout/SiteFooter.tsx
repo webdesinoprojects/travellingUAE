@@ -13,7 +13,7 @@ export async function SiteFooter() {
   const companyColumn = footerColumns[0] ?? { title: "Company", links: [] };
   const travelColumn = footerColumns[1] ?? { title: "Travel Desk", links: [] };
   const legalColumn = footerColumns[2] ?? { title: "Legal", links: [] };
-  const { contact, socialLinks } = footerSettings;
+  const { contact, newsletter, socialLinks } = footerSettings;
   const visibleSocialLinks = socialLinks.filter((l) => l.href.startsWith("https://"));
 
   return (
@@ -25,10 +25,10 @@ export async function SiteFooter() {
         <div className="grid gap-5 rounded-lg border border-white/12 bg-white/[0.06] p-5 backdrop-blur sm:p-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
           <div>
             <p className="text-sm font-extrabold uppercase text-brand-sand">
-              Fly Time updates
+              {newsletter.description}
             </p>
             <h2 className="mt-2 font-serif text-3xl font-semibold leading-tight text-white">
-              Boarding notes before the crowd.
+              {newsletter.title}
             </h2>
           </div>
           <form className="flex flex-col gap-3 sm:flex-row" action="#">
@@ -39,7 +39,7 @@ export async function SiteFooter() {
               suppressHydrationWarning
               id="newsletter-email"
               type="email"
-              placeholder="Enter email"
+              placeholder={newsletter.placeholder}
               className="min-h-12 flex-1 rounded-lg border border-white/20 bg-white px-4 text-brand-navy outline-none transition placeholder:text-brand-blue/50 focus:border-brand-sand focus:ring-3 focus:ring-brand-sand/30"
             />
             <button
@@ -47,7 +47,7 @@ export async function SiteFooter() {
               type="submit"
               className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-brand-sand px-5 text-sm font-extrabold text-brand-navy transition hover:bg-white"
             >
-              Subscribe
+              {newsletter.buttonLabel}
               <ArrowRight aria-hidden="true" className="size-4" />
             </button>
           </form>

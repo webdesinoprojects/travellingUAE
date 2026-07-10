@@ -4,20 +4,22 @@ import Link from "next/link";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { Marquee } from "@/components/ui/Marquee";
 import { TravelIcon } from "@/components/ui/TravelIcon";
+import type { PublicHomeSectionCopy } from "@/types/home";
 import type { ServiceTile } from "@/types/travel";
 
 type ServicesStripProps = {
   services: ServiceTile[];
+  section: PublicHomeSectionCopy;
 };
 
-export function ServicesStrip({ services }: ServicesStripProps) {
+export function ServicesStrip({ services, section }: ServicesStripProps) {
   return (
     <section id="services" className="bg-background px-4 py-16 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-[1240px]">
         <SectionHeading
-          eyebrow="Support Desk"
-          title="What We Handle"
-          description="Flights, stays, visas and documents presented as simple service cards that work for quick enquiries."
+          eyebrow={section.eyebrow}
+          title={section.title}
+          description={section.description}
         />
 
         <Marquee className="mx-auto mt-8 max-w-5xl [--duration:30s]">

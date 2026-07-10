@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import type { PublicHomeSectionCopy } from "@/types/home";
 import type { Testimonial } from "@/types/travel";
 
 const bentoSpans = [
@@ -13,16 +14,17 @@ const bentoSpans = [
 
 type TestimonialsProps = {
   testimonials: Testimonial[];
+  section: PublicHomeSectionCopy;
 };
 
-export function Testimonials({ testimonials }: TestimonialsProps) {
+export function Testimonials({ testimonials, section }: TestimonialsProps) {
   return (
     <section className="bg-brand-sky/38 px-4 py-16 text-brand-navy dark:bg-brand-navy dark:text-white sm:px-6 lg:px-10">
       <div className="mx-auto max-w-[1240px]">
         <SectionHeading
-          eyebrow="Traveler Voices"
-          title="Stories From The Route"
-          description="A bento wall of recent traveler notes, built to scan quickly without turning the page into a review feed."
+          eyebrow={section.eyebrow}
+          title={section.title}
+          description={section.description}
         />
 
         <div className="mt-10 grid auto-rows-[238px] gap-4 md:grid-cols-2 lg:grid-cols-4">

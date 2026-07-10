@@ -62,7 +62,19 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Trips", href: "/admin/trips", icon: Plane },
   { label: "Categories", href: "/admin/categories", icon: Tags },
   { label: "Media", href: "/admin/media", icon: GalleryHorizontalEnd },
-  { label: "Home CMS", href: "/admin/home", icon: Home },
+  {
+    label: "Home CMS",
+    href: "/admin/home/hero",
+    icon: Home,
+    children: [
+      { label: "Hero", href: "/admin/home/hero" },
+      { label: "What We Handle", href: "/admin/home/what-we-handle" },
+      { label: "Routes People Ask For", href: "/admin/home/routes" },
+      { label: "Fly Time Picks", href: "/admin/home/picks" },
+      { label: "Traveler Voices", href: "/admin/home/testimonials" },
+      { label: "Footer", href: "/admin/home/footer" },
+    ],
+  },
   { label: "Pages", href: "/admin/pages", icon: FileText },
   { label: "Navigation", href: "/admin/navigation", icon: Navigation },
   { label: "Translations", href: "/admin/translations", icon: Languages },
@@ -239,6 +251,7 @@ function AdminSidebar({
   const router = useRouter();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     "Hajj & Umrah": pathname.startsWith("/admin/hajj-umrah"),
+    "Home CMS": pathname.startsWith("/admin/home"),
   });
 
   async function handleSignOut() {

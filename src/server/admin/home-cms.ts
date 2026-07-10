@@ -52,6 +52,16 @@ export async function saveAdminHomeHero(
   }
 
   const body = await readJsonObject(request);
+  const title = readString(body, "title", {
+    min: 4,
+    max: 140,
+    required: true,
+  })!;
+  const subtitle = readString(body, "subtitle", {
+    min: 8,
+    max: 320,
+    required: true,
+  })!;
   const backgroundImage = readString(body, "backgroundImage", {
     min: 12,
     max: 1200,
@@ -63,7 +73,12 @@ export async function saveAdminHomeHero(
     required: true,
   })!;
   const status = readHeroStatus(body.status);
-  const hero = validateHomeHeroMedia(backgroundImage, backgroundAlt);
+  const hero = validateHomeHeroMedia(
+    backgroundImage,
+    backgroundAlt,
+    title,
+    subtitle,
+  );
   const supabase = getSupabaseAdminClient();
   const beforeResult = await supabase
     .from("site_sections")

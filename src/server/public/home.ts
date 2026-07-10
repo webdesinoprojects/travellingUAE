@@ -69,8 +69,18 @@ type DbTestimonial = {
 };
 
 type DbSiteSection = {
+  key: string;
+  title: string | null;
+  eyebrow: string | null;
+  description: string | null;
   payload: Record<string, unknown> | null;
 };
+
+const HOME_SITE_SECTION_KEYS = [
+  "home.hero",
+  "home.services",
+  "home.testimonials",
+] as const;
 
 const iconKeys = new Set<TravelIconKey>([
   "flight",
@@ -102,6 +112,18 @@ const fallbackHomeContent: PublicHomeContent = {
     title: "Routes People Ask For",
     description:
       "A visual board of short breaks, city stays, alpine escapes and Eid routes that can open directly into available packages.",
+  },
+  servicesSection: {
+    eyebrow: "Support Desk",
+    title: "What We Handle",
+    description:
+      "Flights, stays, visas and documents presented as simple service cards that work for quick enquiries.",
+  },
+  testimonialsSection: {
+    eyebrow: "Traveler Voices",
+    title: "Stories From The Route",
+    description:
+      "A bento wall of recent traveler notes, built to scan quickly without turning the page into a review feed.",
   },
   exclusives: fallbackExclusives,
   bentoPackages: fallbackBentoPackages,
@@ -135,7 +157,7 @@ async function fetchHomeContentFromSupabase() {
   try {
     const supabase = getSupabasePublicServerClient();
     const [
-      heroResult,
+      sectionsResult,
       collectionsResult,
       itemsResult,
       servicesResult,
@@ -144,10 +166,10 @@ async function fetchHomeContentFromSupabase() {
       await Promise.all([
         supabase
           .from("site_sections")
-          .select("payload")
-          .eq("key", "home.hero")
+          .select("key,title,eyebrow,description,payload")
+          .in("key", [...HOME_SITE_SECTION_KEYS])
           .eq("status", "published")
-          .maybeSingle(),
+          .order("key", { ascending: true }),
         supabase
           .from("collections")
           .select("id,slug,title,eyebrow,description,type,sort_order")
@@ -182,8 +204,8 @@ async function fetchHomeContentFromSupabase() {
           .order("sort_order", { ascending: true }),
       ]);
 
-    if (heroResult.error) {
-      throw heroResult.error;
+    if (sectionsResult.error) {
+      throw sectionsResult.error;
     }
 
     if (collectionsResult.error) {
@@ -207,12 +229,18 @@ async function fetchHomeContentFromSupabase() {
     const dbServices = (servicesResult.data ?? []) as unknown as DbService[];
     const dbTestimonials = (testimonialsResult.data ??
       []) as unknown as DbTestimonial[];
-    const hero = (heroResult.data ?? null) as DbSiteSection | null;
+    const sections = ((sectionsResult.data ?? []) as DbSiteSection[]).reduce(
+      (map, section) => map.set(section.key, section),
+      new Map<string, DbSiteSection>(),
+    );
+    const hero = sections.get("home.hero");
 
     return {
       hero: mapHomeHeroPayload(hero?.payload),
       picksSection: mapSectionCopy(collections, "flytime_picks", fallbackHomeContent.picksSection),
       routesSection: mapSectionCopy(collections, "route_board", fallbackHomeContent.routesSection),
+      servicesSection: mapSiteSectionCopy(sections.get("home.services"), fallbackHomeContent.servicesSection),
+      testimonialsSection: mapSiteSectionCopy(sections.get("home.testimonials"), fallbackHomeContent.testimonialsSection),
       exclusives: mapFlyTimePicks(collections, items),
       bentoPackages: mapRouteBoard(collections, items),
       services: mapServices(dbServices),
@@ -342,6 +370,35 @@ function mapSectionCopy(
     title: section.title.trim() || fallback.title,
     description: section.description?.trim() || fallback.description,
   };
+}
+
+function mapSiteSectionCopy(
+  section: DbSiteSection | undefined,
+  fallback: PublicHomeSectionCopy,
+) {
+  if (!section) {
+    return fallback;
+  }
+
+  const payload = section.payload ?? {};
+  const eyebrow =
+    readPayloadText(payload.eyebrow) ?? section.eyebrow?.trim() ?? "";
+  const title = readPayloadText(payload.title) ?? section.title?.trim() ?? "";
+  const description =
+    readPayloadText(payload.subtitle) ??
+    readPayloadText(payload.description) ??
+    section.description?.trim() ??
+    "";
+
+  return {
+    eyebrow: eyebrow || fallback.eyebrow,
+    title: title || fallback.title,
+    description: description || fallback.description,
+  };
+}
+
+function readPayloadText(value: unknown) {
+  return typeof value === "string" ? value.trim() : undefined;
 }
 
 function getMedia(value: DbMedia | DbMedia[] | null) {

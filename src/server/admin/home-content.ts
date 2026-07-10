@@ -20,6 +20,7 @@ import type {
   AdminHomeCollectionItem,
   AdminHomeContent,
   AdminHomeMediaOption,
+  AdminHomeSectionCopy,
   AdminHomeService,
   AdminHomeTestimonial,
 } from "@/types/home";
@@ -29,7 +30,9 @@ export type HomeContentEntity =
   | "collections"
   | "items"
   | "services"
-  | "testimonials";
+  | "testimonials"
+  | "sections";
+type HomeContentRecordEntity = Exclude<HomeContentEntity, "sections">;
 
 type DbCollection = {
   id: string;
@@ -77,6 +80,16 @@ type DbTestimonial = {
   sort_order: number;
 };
 
+type DbHomeSection = {
+  id: string;
+  key: string;
+  title: string | null;
+  eyebrow: string | null;
+  description: string | null;
+  payload: Record<string, unknown> | null;
+  status: AdminContentStatus;
+};
+
 type DbMedia = {
   id: string;
   public_id: string | null;
@@ -88,6 +101,29 @@ type DbMedia = {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const homeCollectionTypes = new Set(["flytime_picks", "route_board"]);
+const homeSectionDefaults: AdminHomeSectionCopy[] = [
+  {
+    key: "services",
+    siteSectionKey: "home.services",
+    eyebrow: "Support Desk",
+    title: "What We Handle",
+    description:
+      "Flights, stays, visas and documents presented as simple service cards that work for quick enquiries.",
+    status: "draft",
+    source: "fallback",
+  },
+  {
+    key: "testimonials",
+    siteSectionKey: "home.testimonials",
+    eyebrow: "Traveler Voices",
+    title: "Stories From The Route",
+    description:
+      "A bento wall of recent traveler notes, built to scan quickly without turning the page into a review feed.",
+    status: "draft",
+    source: "fallback",
+  },
+];
+const homeSectionKeys = homeSectionDefaults.map((section) => section.siteSectionKey);
 const iconKeys = new Set<TravelIconKey>([
   "flight",
   "hotel",
@@ -109,6 +145,7 @@ export async function getAdminHomeContent(): Promise<AdminHomeContent> {
   if (!hasSupabaseAdminEnv()) {
     return {
       source: "unconfigured",
+      sections: [],
       collections: [],
       items: [],
       services: [],
@@ -118,8 +155,19 @@ export async function getAdminHomeContent(): Promise<AdminHomeContent> {
   }
 
   const supabase = getSupabaseAdminClient();
-  const [collectionsResult, itemsResult, servicesResult, testimonialsResult, mediaResult] =
+  const [
+    sectionsResult,
+    collectionsResult,
+    itemsResult,
+    servicesResult,
+    testimonialsResult,
+    mediaResult,
+  ] =
     await Promise.all([
+      supabase
+        .from("site_sections")
+        .select("id,key,title,eyebrow,description,payload,status")
+        .in("key", homeSectionKeys),
       supabase
         .from("collections")
         .select("id,title,eyebrow,description,type,status,sort_order")
@@ -149,6 +197,7 @@ export async function getAdminHomeContent(): Promise<AdminHomeContent> {
     ]);
 
   for (const error of [
+    sectionsResult.error,
     collectionsResult.error,
     itemsResult.error,
     servicesResult.error,
@@ -173,6 +222,7 @@ export async function getAdminHomeContent(): Promise<AdminHomeContent> {
 
   return {
     source: "database",
+    sections: mapHomeSections((sectionsResult.data ?? []) as DbHomeSection[]),
     collections: visibleCollections.map(mapCollection),
     items: ((itemsResult.data ?? []) as DbCollectionItem[])
       .filter((row) => typeByCollectionId.has(row.collection_id))
@@ -190,14 +240,23 @@ export async function createAdminHomeContent(
   request: Request,
   actor: AdminActor,
 ) {
+  if (entity === "sections") {
+    throw new Error("Sections are updated by key");
+  }
+
+  const recordEntity = entity as HomeContentRecordEntity;
   requireConfiguredAdmin();
-  const payload = await buildPayload(entity, await readJsonObject(request), true);
-  await requirePublishableContent(entity, payload);
+  const payload = await buildPayload(
+    recordEntity,
+    await readJsonObject(request),
+    true,
+  );
+  await requirePublishableContent(recordEntity, payload);
   const supabase = getSupabaseAdminClient();
   const result = await supabase
-    .from(tableForEntity(entity))
+    .from(tableForEntity(recordEntity))
     .insert(payload)
-    .select(selectForEntity(entity))
+    .select(selectForEntity(recordEntity))
     .single();
 
   if (result.error) {
@@ -207,11 +266,11 @@ export async function createAdminHomeContent(
   const row = normalizeRecord(result.data);
   await writeAdminAuditLog({
     actor,
-    action: `home.${entity}.create`,
-    table: tableForEntity(entity),
+    action: `home.${recordEntity}.create`,
+    table: tableForEntity(recordEntity),
     entityId: requireUuid(String(row.id)),
     before: null,
-    after: safeAudit(entity, row),
+    after: safeAudit(recordEntity, row),
   });
 
   return getAdminHomeContent();
@@ -223,10 +282,15 @@ export async function updateAdminHomeContent(
   request: Request,
   actor: AdminActor,
 ) {
+  if (entity === "sections") {
+    return updateAdminHomeSection(id, request, actor);
+  }
+
+  const recordEntity = entity as HomeContentRecordEntity;
   requireConfiguredAdmin();
   const safeId = requireUuid(id);
   const body = await readJsonObject(request);
-  const payload = await buildPayload(entity, body, false);
+  const payload = await buildPayload(recordEntity, body, false);
 
   if (Object.keys(payload).length === 0) {
     throw new Error("No supported fields were provided");
@@ -234,8 +298,8 @@ export async function updateAdminHomeContent(
 
   const supabase = getSupabaseAdminClient();
   const beforeResult = await supabase
-    .from(tableForEntity(entity))
-    .select(selectForEntity(entity))
+    .from(tableForEntity(recordEntity))
+    .select(selectForEntity(recordEntity))
     .eq("id", safeId)
     .single();
 
@@ -244,12 +308,12 @@ export async function updateAdminHomeContent(
   }
 
   const before = normalizeRecord(beforeResult.data);
-  await requirePublishableContent(entity, { ...before, ...payload });
+  await requirePublishableContent(recordEntity, { ...before, ...payload });
   const result = await supabase
-    .from(tableForEntity(entity))
+    .from(tableForEntity(recordEntity))
     .update(payload)
     .eq("id", safeId)
-    .select(selectForEntity(entity))
+    .select(selectForEntity(recordEntity))
     .single();
 
   if (result.error) {
@@ -259,11 +323,11 @@ export async function updateAdminHomeContent(
   const after = normalizeRecord(result.data);
   await writeAdminAuditLog({
     actor,
-    action: `home.${entity}.update`,
-    table: tableForEntity(entity),
+    action: `home.${recordEntity}.update`,
+    table: tableForEntity(recordEntity),
     entityId: safeId,
-    before: safeAudit(entity, before),
-    after: safeAudit(entity, after),
+    before: safeAudit(recordEntity, before),
+    after: safeAudit(recordEntity, after),
   });
 
   return getAdminHomeContent();
@@ -274,12 +338,17 @@ export async function archiveAdminHomeContent(
   id: string,
   actor: AdminActor,
 ) {
+  if (entity === "sections") {
+    throw new Error("Sections cannot be archived from Home CMS");
+  }
+
+  const recordEntity = entity as HomeContentRecordEntity;
   requireConfiguredAdmin();
   const safeId = requireUuid(id);
   const supabase = getSupabaseAdminClient();
   const beforeResult = await supabase
-    .from(tableForEntity(entity))
-    .select(selectForEntity(entity))
+    .from(tableForEntity(recordEntity))
+    .select(selectForEntity(recordEntity))
     .eq("id", safeId)
     .single();
 
@@ -288,10 +357,10 @@ export async function archiveAdminHomeContent(
   }
 
   const result = await supabase
-    .from(tableForEntity(entity))
+    .from(tableForEntity(recordEntity))
     .update({ status: "archived" })
     .eq("id", safeId)
-    .select(selectForEntity(entity))
+    .select(selectForEntity(recordEntity))
     .single();
 
   if (result.error) {
@@ -302,18 +371,89 @@ export async function archiveAdminHomeContent(
   const after = normalizeRecord(result.data);
   await writeAdminAuditLog({
     actor,
-    action: `home.${entity}.archive`,
-    table: tableForEntity(entity),
+    action: `home.${recordEntity}.archive`,
+    table: tableForEntity(recordEntity),
     entityId: safeId,
-    before: safeAudit(entity, before),
-    after: safeAudit(entity, after),
+    before: safeAudit(recordEntity, before),
+    after: safeAudit(recordEntity, after),
+  });
+
+  return getAdminHomeContent();
+}
+
+async function updateAdminHomeSection(
+  key: string,
+  request: Request,
+  actor: AdminActor,
+) {
+  requireConfiguredAdmin();
+  const definition = readHomeSectionDefinition(key);
+  const body = await readJsonObject(request);
+  const title = readString(body, "title", {
+    min: 2,
+    max: 140,
+    required: true,
+  })!;
+  const eyebrow = readString(body, "eyebrow", { max: 100 }) ?? "";
+  const description = readString(body, "description", { max: 400 }) ?? "";
+  const status = readStatus(body) ?? "draft";
+
+  if (status === "published") {
+    requireTextValue(title, "Section title");
+  }
+
+  const payload = {
+    eyebrow,
+    title,
+    subtitle: description,
+  };
+  const supabase = getSupabaseAdminClient();
+  const beforeResult = await supabase
+    .from("site_sections")
+    .select("id,key,title,eyebrow,description,payload,status")
+    .eq("key", definition.siteSectionKey)
+    .maybeSingle();
+
+  if (beforeResult.error) {
+    throw beforeResult.error;
+  }
+
+  const before = (beforeResult.data ?? null) as DbHomeSection | null;
+  const result = await supabase
+    .from("site_sections")
+    .upsert(
+      {
+        key: definition.siteSectionKey,
+        title,
+        eyebrow,
+        description,
+        payload,
+        status,
+      },
+      { onConflict: "key" },
+    )
+    .select("id,key,title,eyebrow,description,payload,status")
+    .single();
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  const after = result.data as DbHomeSection;
+  await writeAdminAuditLog({
+    actor,
+    action: "home.sections.update",
+    table: "site_sections",
+    entityId: after.id,
+    before: before ? safeHomeSectionAudit(before, definition) : null,
+    after: safeHomeSectionAudit(after, definition),
   });
 
   return getAdminHomeContent();
 }
 
 async function buildPayload(
-  entity: HomeContentEntity,
+  entity: HomeContentRecordEntity,
   body: UnknownRecord,
   creating: boolean,
 ) {
@@ -519,7 +659,7 @@ function readIcon(body: UnknownRecord) {
 }
 
 async function requirePublishableContent(
-  entity: HomeContentEntity,
+  entity: HomeContentRecordEntity,
   row: Record<string, unknown>,
 ) {
   if (row.status !== "published") {
@@ -572,6 +712,39 @@ async function requirePublishableContent(
 
   requireTextValue(row.author, "Testimonial author");
   requireTextValue(row.quote, "Testimonial quote");
+}
+
+function mapHomeSections(rows: DbHomeSection[]): AdminHomeSectionCopy[] {
+  const byKey = new Map(rows.map((row) => [row.key, row]));
+
+  return homeSectionDefaults.map((definition) => {
+    const row = byKey.get(definition.siteSectionKey);
+
+    if (!row) {
+      return definition;
+    }
+
+    const payload = row.payload ?? {};
+    const eyebrow =
+      readPayloadText(payload.eyebrow) ?? row.eyebrow?.trim() ?? "";
+    const title = readPayloadText(payload.title) ?? row.title?.trim() ?? "";
+    const description =
+      readPayloadText(payload.subtitle) ??
+      readPayloadText(payload.description) ??
+      row.description?.trim() ??
+      "";
+
+    return {
+      id: row.id,
+      key: definition.key,
+      siteSectionKey: definition.siteSectionKey,
+      eyebrow: eyebrow || definition.eyebrow,
+      title: title || definition.title,
+      description: description || definition.description,
+      status: row.status,
+      source: "database",
+    };
+  });
 }
 
 function mapCollection(row: DbCollection): AdminHomeCollection {
@@ -658,7 +831,7 @@ function mapMedia(row: DbMedia): AdminHomeMediaOption[] {
   ];
 }
 
-function selectForEntity(entity: HomeContentEntity) {
+function selectForEntity(entity: HomeContentRecordEntity) {
   switch (entity) {
     case "collections":
       return "id,title,eyebrow,description,type,status,sort_order";
@@ -671,7 +844,7 @@ function selectForEntity(entity: HomeContentEntity) {
   }
 }
 
-function tableForEntity(entity: HomeContentEntity) {
+function tableForEntity(entity: HomeContentRecordEntity) {
   return entity === "items" ? "collection_items" : entity;
 }
 
@@ -700,7 +873,7 @@ function compact(value: Record<string, unknown>) {
   );
 }
 
-function safeAudit(entity: HomeContentEntity, row: Record<string, unknown>) {
+function safeAudit(entity: HomeContentRecordEntity, row: Record<string, unknown>) {
   const allowed = selectForEntity(entity).split(",");
 
   return Object.fromEntries(
@@ -708,6 +881,35 @@ function safeAudit(entity: HomeContentEntity, row: Record<string, unknown>) {
       .filter((key) => key !== "body")
       .map((key) => [key, row[key] ?? null]),
   );
+}
+
+function safeHomeSectionAudit(
+  row: DbHomeSection,
+  definition: AdminHomeSectionCopy,
+) {
+  return {
+    key: definition.siteSectionKey,
+    status: row.status,
+    section: mapHomeSections([row]).find(
+      (item) => item.key === definition.key,
+    ),
+  };
+}
+
+function readHomeSectionDefinition(key: string) {
+  const definition = homeSectionDefaults.find(
+    (section) => section.key === key || section.siteSectionKey === key,
+  );
+
+  if (!definition) {
+    throw new Error("Unknown homepage section");
+  }
+
+  return definition;
+}
+
+function readPayloadText(value: unknown) {
+  return typeof value === "string" ? value.trim() : undefined;
 }
 
 function normalizeRecord(value: unknown) {

@@ -13,9 +13,17 @@ export type PublicFooterContact = {
   email: string;
 };
 
+export type PublicFooterNewsletter = {
+  title: string;
+  description: string;
+  placeholder: string;
+  buttonLabel: string;
+};
+
 export type PublicFooterSettings = {
   contact: PublicFooterContact;
   socialLinks: PublicFooterSocialLink[];
+  newsletter: PublicFooterNewsletter;
 };
 
 export type AdminFooterSettings = {
@@ -25,4 +33,5 @@ export type AdminFooterSettings = {
   source: "fallback" | "database";
   contact: PublicFooterContact;
   socialLinks: PublicFooterSocialLink[];
+  newsletter: PublicFooterNewsletter;
 };

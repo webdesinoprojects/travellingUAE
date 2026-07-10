@@ -15,6 +15,7 @@ import type { AdminActor } from "@/server/supabase/auth";
 import type {
   AdminFooterSettings,
   PublicFooterContact,
+  PublicFooterNewsletter,
   PublicFooterSocialLink,
   SocialPlatform,
 } from "@/types/footer";
@@ -44,6 +45,12 @@ export const FALLBACK_FOOTER_SETTINGS: AdminFooterSettings = {
     { platform: "instagram", label: "Instagram", href: "#" },
     { platform: "linkedin", label: "LinkedIn", href: "#" },
   ],
+  newsletter: {
+    title: "Boarding notes before the crowd.",
+    description: "Fly Time updates",
+    placeholder: "Enter email",
+    buttonLabel: "Subscribe",
+  },
 };
 
 type DbFooterRow = {
@@ -88,6 +95,7 @@ export async function saveAdminFooterSettings(
   const body = await readJsonObject(request);
   const contact = buildContactPayload(body);
   const socialLinks = buildSocialLinksPayload(body);
+  const newsletter = buildNewsletterPayload(body);
   const statusRaw = readString(body, "status", { max: 20 });
   const status: "draft" | "published" | "archived" =
     statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
@@ -96,7 +104,7 @@ export async function saveAdminFooterSettings(
     throw new Error("A contact email is required to publish footer settings.");
   }
 
-  const payload = { contact, socialLinks };
+  const payload = { contact, socialLinks, newsletter };
   const supabase = getSupabaseAdminClient();
 
   const existing = await supabase
@@ -200,10 +208,29 @@ function buildSocialLinksPayload(body: UnknownRecord): PublicFooterSocialLink[] 
   return links;
 }
 
+function buildNewsletterPayload(body: UnknownRecord): PublicFooterNewsletter {
+  return {
+    title:
+      readString(body, "newsletterTitle", { min: 2, max: 140 }) ??
+      FALLBACK_FOOTER_SETTINGS.newsletter.title,
+    description:
+      readString(body, "newsletterDescription", { min: 2, max: 140 }) ??
+      FALLBACK_FOOTER_SETTINGS.newsletter.description,
+    placeholder:
+      readString(body, "newsletterPlaceholder", { min: 2, max: 80 }) ??
+      FALLBACK_FOOTER_SETTINGS.newsletter.placeholder,
+    buttonLabel:
+      readString(body, "newsletterButtonLabel", { min: 2, max: 40 }) ??
+      FALLBACK_FOOTER_SETTINGS.newsletter.buttonLabel,
+  };
+}
+
 function mapAdminFooter(row: DbFooterRow): AdminFooterSettings {
   const payload = isRecord(row.payload) ? row.payload : null;
   const contactRaw = payload && isRecord(payload.contact) ? payload.contact : null;
   const linksRaw = payload && Array.isArray(payload.socialLinks) ? payload.socialLinks : null;
+  const newsletterRaw =
+    payload && isRecord(payload.newsletter) ? payload.newsletter : null;
 
   return {
     id: row.id,
@@ -244,5 +271,23 @@ function mapAdminFooter(row: DbFooterRow): AdminFooterSettings {
             href: typeof item.href === "string" ? item.href : "#",
           }))
       : FALLBACK_FOOTER_SETTINGS.socialLinks,
+    newsletter: {
+      title:
+        typeof newsletterRaw?.title === "string"
+          ? newsletterRaw.title
+          : FALLBACK_FOOTER_SETTINGS.newsletter.title,
+      description:
+        typeof newsletterRaw?.description === "string"
+          ? newsletterRaw.description
+          : FALLBACK_FOOTER_SETTINGS.newsletter.description,
+      placeholder:
+        typeof newsletterRaw?.placeholder === "string"
+          ? newsletterRaw.placeholder
+          : FALLBACK_FOOTER_SETTINGS.newsletter.placeholder,
+      buttonLabel:
+        typeof newsletterRaw?.buttonLabel === "string"
+          ? newsletterRaw.buttonLabel
+          : FALLBACK_FOOTER_SETTINGS.newsletter.buttonLabel,
+    },
   };
 }

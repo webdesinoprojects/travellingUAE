@@ -78,18 +78,8 @@ export default async function Home({ searchParams }: HomeProps) {
     getPublicTranslations(currentLocale.code, "common"),
   ]);
   const heroCopy = {
-    title: readPublicMessage(
-      homeTranslations,
-      "home",
-      "hero.title",
-      "Journeys built around your time.",
-    ),
-    description: readPublicMessage(
-      homeTranslations,
-      "home",
-      "hero.description",
-      "Flights, stays, visas and holiday routes in one calm booking experience for families, groups and frequent travelers.",
-    ),
+    title: homeContent.hero.title,
+    description: homeContent.hero.subtitle,
     quickAccess: readPublicMessage(
       homeTranslations,
       "home",
@@ -165,10 +155,16 @@ export default async function Home({ searchParams }: HomeProps) {
           />
         ) : null}
         {homeContent.services.length > 0 ? (
-          <ServicesStrip services={homeContent.services} />
+          <ServicesStrip
+            services={homeContent.services}
+            section={homeContent.servicesSection}
+          />
         ) : null}
         {homeContent.testimonials.length > 0 ? (
-          <Testimonials testimonials={homeContent.testimonials} />
+          <Testimonials
+            testimonials={homeContent.testimonials}
+            section={homeContent.testimonialsSection}
+          />
         ) : null}
       </main>
       <SiteFooter />

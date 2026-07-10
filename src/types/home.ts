@@ -7,6 +7,8 @@ import type {
 } from "@/types/travel";
 
 export type PublicHeroMedia = {
+  title: string;
+  subtitle: string;
   backgroundImage: string;
   backgroundAlt: string;
 };
@@ -28,6 +30,8 @@ export type PublicHomeContent = {
   hero: PublicHeroMedia;
   picksSection: PublicHomeSectionCopy;
   routesSection: PublicHomeSectionCopy;
+  servicesSection: PublicHomeSectionCopy;
+  testimonialsSection: PublicHomeSectionCopy;
   exclusives: ProductCard[];
   bentoPackages: BentoPackage[];
   services: ServiceTile[];
@@ -51,6 +55,14 @@ export type AdminHomeCollection = {
   type: "flytime_picks" | "route_board";
   status: AdminContentStatus;
   sortOrder: number;
+};
+
+export type AdminHomeSectionCopy = PublicHomeSectionCopy & {
+  id?: string;
+  key: "services" | "testimonials";
+  siteSectionKey: "home.services" | "home.testimonials";
+  status: AdminContentStatus;
+  source: "fallback" | "database";
 };
 
 export type AdminHomeCollectionItem = {
@@ -92,6 +104,7 @@ export type AdminHomeTestimonial = {
 
 export type AdminHomeContent = {
   source: "database" | "unconfigured";
+  sections: AdminHomeSectionCopy[];
   collections: AdminHomeCollection[];
   items: AdminHomeCollectionItem[];
   services: AdminHomeService[];

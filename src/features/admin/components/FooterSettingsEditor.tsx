@@ -30,6 +30,12 @@ export function FooterSettingsEditor({
   const [socialLinks, setSocialLinks] = useState(
     initialSettings.socialLinks.map((l) => ({ ...l })),
   );
+  const [newsletter, setNewsletter] = useState({
+    title: initialSettings.newsletter.title,
+    description: initialSettings.newsletter.description,
+    placeholder: initialSettings.newsletter.placeholder,
+    buttonLabel: initialSettings.newsletter.buttonLabel,
+  });
 
   const [status, setStatus] = useState<"draft" | "published">(
     initialSettings.status === "published" ? "published" : "draft",
@@ -61,6 +67,10 @@ export function FooterSettingsEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...contact,
+          newsletterTitle: newsletter.title,
+          newsletterDescription: newsletter.description,
+          newsletterPlaceholder: newsletter.placeholder,
+          newsletterButtonLabel: newsletter.buttonLabel,
           socialLinks,
           status,
         }),
@@ -83,6 +93,12 @@ export function FooterSettingsEditor({
         email: saved.contact.email,
       });
       setSocialLinks(saved.socialLinks.map((l) => ({ ...l })));
+      setNewsletter({
+        title: saved.newsletter.title,
+        description: saved.newsletter.description,
+        placeholder: saved.newsletter.placeholder,
+        buttonLabel: saved.newsletter.buttonLabel,
+      });
       setStatus(saved.status === "published" ? "published" : "draft");
       setSaveState({
         status: "saved",
@@ -200,6 +216,81 @@ export function FooterSettingsEditor({
                 </div>
               </label>
             ))}
+          </div>
+        </fieldset>
+
+        <fieldset className="grid gap-4 rounded-lg border border-[#d7c5ad] p-4 dark:border-white/10">
+          <legend className="px-1 text-xs font-black uppercase tracking-[0.14em] text-brand-brown">
+            Newsletter copy
+          </legend>
+
+          <label className="grid gap-2 text-sm font-bold text-brand-navy dark:text-white">
+            Description
+            <input
+              type="text"
+              maxLength={140}
+              value={newsletter.description}
+              onChange={(e) =>
+                setNewsletter((current) => ({
+                  ...current,
+                  description: e.target.value,
+                }))
+              }
+              className="min-h-12 rounded-lg border border-[#d7c5ad] bg-[#fffaf2] px-3 text-sm text-brand-navy outline-none focus:border-brand-blue dark:border-white/10 dark:bg-white/10 dark:text-white"
+            />
+          </label>
+
+          <label className="grid gap-2 text-sm font-bold text-brand-navy dark:text-white">
+            Title
+            <input
+              required
+              type="text"
+              maxLength={140}
+              value={newsletter.title}
+              onChange={(e) =>
+                setNewsletter((current) => ({
+                  ...current,
+                  title: e.target.value,
+                }))
+              }
+              className="min-h-12 rounded-lg border border-[#d7c5ad] bg-[#fffaf2] px-3 text-sm text-brand-navy outline-none focus:border-brand-blue dark:border-white/10 dark:bg-white/10 dark:text-white"
+            />
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-2 text-sm font-bold text-brand-navy dark:text-white">
+              Input placeholder
+              <input
+                required
+                type="text"
+                maxLength={80}
+                value={newsletter.placeholder}
+                onChange={(e) =>
+                  setNewsletter((current) => ({
+                    ...current,
+                    placeholder: e.target.value,
+                  }))
+                }
+                className="min-h-12 rounded-lg border border-[#d7c5ad] bg-[#fffaf2] px-3 text-sm text-brand-navy outline-none focus:border-brand-blue dark:border-white/10 dark:bg-white/10 dark:text-white"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-bold text-brand-navy dark:text-white">
+              Button label
+              <input
+                required
+                type="text"
+                maxLength={40}
+                value={newsletter.buttonLabel}
+                onChange={(e) =>
+                  setNewsletter((current) => ({
+                    ...current,
+                    buttonLabel: e.target.value,
+                  }))
+                }
+                className="min-h-12 rounded-lg border border-[#d7c5ad] bg-[#fffaf2] px-3 text-sm text-brand-navy outline-none focus:border-brand-blue dark:border-white/10 dark:bg-white/10 dark:text-white"
+              />
+            </label>
           </div>
         </fieldset>
 

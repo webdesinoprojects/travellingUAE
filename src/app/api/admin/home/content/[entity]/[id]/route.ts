@@ -12,6 +12,7 @@ import { verifyAdminApiAccess } from "@/server/supabase/auth";
 export const dynamic = "force-dynamic";
 
 const mutableEntities = new Set<HomeContentEntity>([
+  "sections",
   "collections",
   "items",
   "services",
