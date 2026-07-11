@@ -3,9 +3,11 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 
 import { logServerError } from "@/server/http/response";
+import { enrichRatesWithStaticRoomGroups } from "@/server/hotels/hotel-content-display";
 import {
   getLocalHotelContent,
   getLocalHotelDestinationSuggestions,
+  getLocalHotelRichContent,
   type LocalHotelContent,
 } from "@/server/hotels/content";
 import { buildLiveHotelQuotes, buildRequestHash } from "@/server/providers/ratehawk/hotel-options";
@@ -29,7 +31,12 @@ import type {
 export const HOTEL_SEARCH_COOKIE = "flytime_hotel_search";
 export const HOTEL_SEARCH_TTL_SECONDS = 30 * 60;
 
-const QUOTE_TTL_MS = 5 * 60 * 1000;
+// Search-result / hotelpage quote snapshot lifetime. Aligned with the 30-minute
+// search session (HOTEL_SEARCH_TTL_SECONDS) so the results + detail pages stay
+// open for the whole session instead of expiring after ~5 minutes. This is a
+// display/selection TTL only: prebook always re-validates price + availability
+// live against ETG, so a within-session quote can never be booked stale.
+const QUOTE_TTL_MS = 30 * 60 * 1000;
 const RATEHAWK_PROVIDER_SLUG = "ratehawk-hotel";
 const MAX_RESULTS = 12;
 const SUGGESTION_TTL_MS = 10 * 60 * 1000;
@@ -343,6 +350,21 @@ export async function getHotelDetail(
   // and are never read back to render a later Hotelpage request.
   const detailQuotes = await createHotelPageQuotes(context, searchQuote);
 
+  // Rich static content (gallery/amenities/description/policies) is best-effort:
+  // a lean/unsynced hotel or a read failure must never break the detail page.
+  let staticContent = null;
+  try {
+    staticContent = await getLocalHotelRichContent(
+      context.provider_id,
+      hotelId,
+      context.language,
+    );
+  } catch (error) {
+    logServerError("hotels.detail.static_content", error);
+  }
+
+  const rates = detailQuotes.map(mapDetailRate);
+
   return {
     searchId: context.id,
     hotel: {
@@ -352,8 +374,9 @@ export async function getHotelDetail(
     checkIn: context.checkin,
     checkOut: context.checkout,
     rooms: context.guests,
-    rates: detailQuotes.map(mapDetailRate),
+    rates: staticContent ? enrichRatesWithStaticRoomGroups(rates, staticContent.roomGroups) : rates,
     expiresAt: context.expires_at,
+    staticContent,
   };
 }
 
@@ -601,6 +624,20 @@ async function createHotelPageQuotes(
           stage: "hotelpage",
           room_name: rate.roomName,
           board_basis: mapMealToBoardBasis(rate.meal) ?? null,
+          room_group_name: rate.roomGroupName,
+          room_images: rate.roomImages,
+          room_photo_count: rate.roomPhotoCount,
+          bed_type: rate.bedType,
+          beds: rate.beds,
+          room_size_sqm: rate.roomSizeSqm,
+          room_amenities: rate.amenities,
+          smoking_label: rate.smokingLabel,
+          has_bathroom: rate.hasBathroom,
+          capacity: rate.capacity,
+          allotment: rate.allotment,
+          cancellation_free_before: rate.cancellationFreeBefore,
+          cancellation_policy_count: rate.cancellationPolicyCount,
+          payment_type: rate.paymentType,
         },
         metadata: {
           search_hash: rate.searchHash,
@@ -878,12 +915,27 @@ function mapSearchCard(row: QuoteRow): HotelSearchCardDTO {
 
 function mapDetailRate(row: QuoteRow): HotelRateDTO {
   const safe = row.safe_payload ?? {};
+  const roomImages = readHttpsUrlArray(safe.room_images);
   return {
     rateId: row.id,
     roomName: readText(safe.room_name),
     boardBasis: readText(safe.board_basis),
     priceAmount: Number(row.price_amount) || 0,
     currency: row.currency,
+    roomGroupName: readText(safe.room_group_name),
+    roomImages,
+    roomPhotoCount: readPositiveInteger(safe.room_photo_count) ?? roomImages.length,
+    bedType: readText(safe.bed_type),
+    beds: readStringArray(safe.beds),
+    roomSizeSqm: readPositiveNumber(safe.room_size_sqm),
+    amenities: readStringArray(safe.room_amenities),
+    smokingLabel: readText(safe.smoking_label),
+    hasBathroom: safe.has_bathroom === true,
+    capacity: readPositiveInteger(safe.capacity),
+    allotment: readPositiveInteger(safe.allotment),
+    cancellationFreeBefore: readText(safe.cancellation_free_before),
+    cancellationPolicyCount: readPositiveInteger(safe.cancellation_policy_count) ?? 0,
+    paymentType: readText(safe.payment_type),
   };
 }
 
@@ -918,9 +970,42 @@ function readNullableNumber(value: unknown) {
   return Number.isFinite(number) ? number : null;
 }
 
+function readPositiveNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
 function readPositiveInteger(value: unknown) {
   const number = Number(value);
   return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
+
+function readStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const item of value) {
+    const text = readText(item);
+    if (!text || seen.has(text.toLowerCase())) continue;
+    seen.add(text.toLowerCase());
+    output.push(text);
+    if (output.length >= 12) break;
+  }
+  return output;
+}
+
+function readHttpsUrlArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const url = readHttpsUrl(item);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+    if (urls.length >= 8) break;
+  }
+  return urls;
 }
 
 function isUuid(value: string) {

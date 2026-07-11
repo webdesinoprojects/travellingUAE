@@ -2,7 +2,14 @@ import "server-only";
 
 import { logServerError } from "@/server/http/response";
 import { getSupabaseAdminClient } from "@/server/supabase/client";
-import type { HotelDestinationSuggestion } from "@/types/hotels";
+import type { HotelDestinationSuggestion, HotelStaticContentDTO } from "@/types/hotels";
+import {
+  buildHotelGalleryImages,
+  extractStaticRoomGroups,
+  extractPaidOnSpot,
+  extractSafeHotelPolicies,
+  pickHotelAmenities,
+} from "@/server/hotels/hotel-content-display";
 
 const COUNTRY_CODE_BY_QUERY = new Map([
   ["india", "IN"],
@@ -58,6 +65,51 @@ export async function getLocalHotelContent(
     });
   }
   return content;
+}
+
+/**
+ * Rich static content for a single hotel (detail page). Reads only the safe
+ * columns from provider_hotel_content and sanitizes them: gallery images
+ * (https, primary-first, capped), amenities, description, and readable policy
+ * fields. Returns null when the hotel has no synced static row (lean rows), so
+ * the detail page falls back to the live search image + fields.
+ */
+export async function getLocalHotelRichContent(
+  providerId: string,
+  hotelId: string,
+  language = "en",
+): Promise<HotelStaticContentDTO | null> {
+  const trimmedId = hotelId?.trim();
+  if (!trimmedId) return null;
+
+  const result = await getSupabaseAdminClient()
+    .from("provider_hotel_content")
+    .select(
+      "hotel_id,name,star_rating,primary_image_url,image_urls,room_groups,amenities,description,policies,address,latitude,longitude,region_name,region_country_code",
+    )
+    .eq("provider_id", providerId)
+    .eq("language", language)
+    .eq("hotel_id", trimmedId)
+    .maybeSingle();
+
+  if (result.error) throw result.error;
+  const row = (result.data ?? null) as Record<string, unknown> | null;
+  if (!row) return null;
+
+  return {
+    images: buildHotelGalleryImages(row.primary_image_url, row.image_urls),
+    roomGroups: extractStaticRoomGroups(row.room_groups),
+    amenities: pickHotelAmenities(row.amenities),
+    description: textOrNull(row.description),
+    policies: extractSafeHotelPolicies(row.policies),
+    paidOnSpot: extractPaidOnSpot(row.policies),
+    starRating: finiteOrNull(row.star_rating),
+    address: textOrNull(row.address),
+    regionName: textOrNull(row.region_name),
+    countryCode: textOrNull(row.region_country_code),
+    latitude: finiteOrNull(row.latitude),
+    longitude: finiteOrNull(row.longitude),
+  };
 }
 
 export async function getLocalHotelDestinationSuggestions(

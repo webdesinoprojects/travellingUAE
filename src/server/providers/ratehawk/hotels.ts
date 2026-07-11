@@ -263,13 +263,13 @@ function toCleanString(value: unknown): string | null {
  * (display currency = the currency we requested). Returns the lowest
  * payment-type amount for the rate.
  */
-function extractRatePrice(
+function extractRatePaymentDetails(
   rateRecord: Record<string, unknown> | null,
-): { amount: number; currency: string | null } | null {
+): RatePaymentDetails | null {
   const paymentOptions = asRecord(rateRecord?.payment_options);
   const paymentTypes = asArray(paymentOptions?.payment_types);
 
-  let best: { amount: number; currency: string | null } | null = null;
+  let best: RatePaymentDetails | null = null;
 
   for (const pt of paymentTypes) {
     const ptRecord = asRecord(pt);
@@ -280,13 +280,28 @@ function extractRatePrice(
     }
 
     const currency = toCleanString(ptRecord?.show_currency_code);
+    const penalties = asRecord(ptRecord?.cancellation_penalties);
+    const cancellationPolicies = asArray(penalties?.policies);
 
     if (best === null || amount < best.amount) {
-      best = { amount, currency };
+      best = {
+        amount,
+        currency,
+        paymentType: toCleanString(ptRecord?.type),
+        cancellationFreeBefore: toCleanString(penalties?.free_cancellation_before),
+        cancellationPolicyCount: cancellationPolicies.length,
+      };
     }
   }
 
   return best;
+}
+
+function extractRatePrice(
+  rateRecord: Record<string, unknown> | null,
+): { amount: number; currency: string | null } | null {
+  const details = extractRatePaymentDetails(rateRecord);
+  return details ? { amount: details.amount, currency: details.currency } : null;
 }
 
 /**
@@ -330,6 +345,14 @@ const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_CACHE_MAX_ENTRIES = 500;
 
 type CacheEntry = { value: HotelSearchDTO; expiresAt: number };
+
+type RatePaymentDetails = {
+  amount: number;
+  currency: string | null;
+  paymentType: string | null;
+  cancellationFreeBefore: string | null;
+  cancellationPolicyCount: number;
+};
 
 const searchCache = new Map<string, CacheEntry>();
 
@@ -738,6 +761,20 @@ export type HotelPageRate = {
   currency: string | null;
   roomName: string | null;
   meal: string | null;
+  roomGroupName: string | null;
+  roomImages: string[];
+  roomPhotoCount: number;
+  bedType: string | null;
+  beds: string[];
+  roomSizeSqm: number | null;
+  amenities: string[];
+  smokingLabel: string | null;
+  hasBathroom: boolean;
+  capacity: number | null;
+  allotment: number | null;
+  cancellationFreeBefore: string | null;
+  cancellationPolicyCount: number;
+  paymentType: string | null;
 };
 
 /**
@@ -805,23 +842,205 @@ export async function searchHotelPage(
   return rates
     .map((entry): HotelPageRate | null => {
       const rateRecord = asRecord(entry);
-      const price = extractRatePrice(rateRecord);
+      const payment = extractRatePaymentDetails(rateRecord);
 
-      if (!price) {
+      if (!payment) {
         return null;
       }
+
+      const roomData = asRecord(rateRecord?.room_data_trans);
+      const roomName = toCleanString(rateRecord?.room_name);
+      const roomImages = extractRoomImages(rateRecord, roomData);
 
       return {
         searchHash: toCleanString(rateRecord?.search_hash),
         matchHash: toCleanString(rateRecord?.match_hash),
         bookHash: toCleanString(rateRecord?.book_hash),
-        priceAmount: price.amount,
-        currency: price.currency,
-        roomName: toCleanString(rateRecord?.room_name),
+        priceAmount: payment.amount,
+        currency: payment.currency,
+        roomName,
         meal: toCleanString(rateRecord?.meal),
+        roomGroupName:
+          toCleanString(roomData?.main_name) ??
+          toCleanString(roomData?.main_room_type) ??
+          roomName,
+        roomImages,
+        roomPhotoCount: roomImages.length,
+        bedType: extractBedType(roomData),
+        beds: extractBeds(roomData?.beds),
+        roomSizeSqm: extractRoomSizeSqm(rateRecord, roomData),
+        amenities: extractRoomAmenities(rateRecord),
+        smokingLabel: extractSmokingLabel(rateRecord),
+        hasBathroom: hasBathroom(rateRecord),
+        capacity: positiveInteger(asRecord(rateRecord?.rg_ext)?.capacity),
+        allotment: positiveInteger(rateRecord?.allotment),
+        cancellationFreeBefore: payment.cancellationFreeBefore,
+        cancellationPolicyCount: payment.cancellationPolicyCount,
+        paymentType: payment.paymentType,
       };
     })
     .filter((r): r is HotelPageRate => r !== null);
+}
+
+function extractRoomAmenities(rateRecord: Record<string, unknown> | null): string[] {
+  const values = [
+    ...asArray(rateRecord?.amenities_data),
+    ...asArray(rateRecord?.serp_filters).map(mapSerpFilterLabel),
+  ];
+  const seen = new Set<string>();
+  const amenities: string[] = [];
+
+  for (const value of values) {
+    const label = cleanDisplayLabel(value);
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    amenities.push(label);
+    if (amenities.length >= 8) break;
+  }
+
+  return amenities;
+}
+
+function mapSerpFilterLabel(value: unknown): string | null {
+  const text = toCleanString(value);
+  if (!text) return null;
+  if (text === "has_bathroom") return "Bathroom";
+  return text;
+}
+
+function extractSmokingLabel(rateRecord: Record<string, unknown> | null): string | null {
+  const amenities = asArray(rateRecord?.amenities_data)
+    .map((value) => toCleanString(value)?.toLowerCase())
+    .filter((value): value is string => Boolean(value));
+
+  if (amenities.some((value) => value.includes("non-smoking") || value.includes("non smoking"))) {
+    return "Non-smoking";
+  }
+  if (amenities.some((value) => value === "smoking" || value.includes("smoking room"))) {
+    return "Smoking";
+  }
+  return null;
+}
+
+function hasBathroom(rateRecord: Record<string, unknown> | null): boolean {
+  const filters = asArray(rateRecord?.serp_filters);
+  if (filters.some((value) => toCleanString(value) === "has_bathroom")) return true;
+  const bathroom = toFiniteNumber(asRecord(rateRecord?.rg_ext)?.bathroom);
+  return bathroom !== null && bathroom > 0;
+}
+
+function extractBedType(roomData: Record<string, unknown> | null): string | null {
+  return cleanDisplayLabel(roomData?.bedding_type);
+}
+
+function extractBeds(value: unknown): string[] {
+  const beds: string[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of asArray(value)) {
+    const record = asRecord(entry);
+    const label =
+      cleanDisplayLabel(entry) ??
+      cleanDisplayLabel(record?.name) ??
+      cleanDisplayLabel(record?.type) ??
+      cleanDisplayLabel(record?.bedding_type);
+    if (!label) continue;
+    const count = positiveInteger(record?.count);
+    const display = count && count > 1 ? `${count} ${label}` : label;
+    const key = display.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    beds.push(display);
+    if (beds.length >= 4) break;
+  }
+
+  return beds;
+}
+
+function extractRoomSizeSqm(
+  rateRecord: Record<string, unknown> | null,
+  roomData: Record<string, unknown> | null,
+): number | null {
+  const candidates = [
+    roomData?.room_area,
+    roomData?.room_size,
+    roomData?.area,
+    roomData?.size,
+    rateRecord?.room_area,
+    rateRecord?.room_size,
+  ];
+
+  for (const candidate of candidates) {
+    const record = asRecord(candidate);
+    const value =
+      toFiniteNumber(candidate) ??
+      toFiniteNumber(record?.square_meters) ??
+      toFiniteNumber(record?.sqm) ??
+      toFiniteNumber(record?.value);
+    if (value !== null && value > 0 && value < 1000) return value;
+  }
+
+  return null;
+}
+
+function extractRoomImages(
+  rateRecord: Record<string, unknown> | null,
+  roomData: Record<string, unknown> | null,
+): string[] {
+  const candidates = [
+    ...asArray(rateRecord?.images),
+    ...asArray(rateRecord?.room_images),
+    ...asArray(rateRecord?.images_ext),
+    ...asArray(roomData?.images),
+    ...asArray(roomData?.room_images),
+    ...asArray(roomData?.photos),
+    ...asArray(roomData?.images_ext),
+    ...asArray(roomData?.photo_urls),
+  ];
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const candidate of candidates) {
+    const record = asRecord(candidate);
+    const url =
+      providerImageUrl(record?.url) ??
+      providerImageUrl(record?.src) ??
+      providerImageUrl(candidate);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+    if (urls.length >= 8) break;
+  }
+
+  return urls;
+}
+
+function cleanDisplayLabel(value: unknown): string | null {
+  const text = toCleanString(value);
+  if (!text) return null;
+  return text
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function positiveInteger(value: unknown): number | null {
+  const parsed = toFiniteNumber(value);
+  return parsed !== null && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function providerImageUrl(value: unknown): string | null {
+  const text = toCleanString(value);
+  if (!text) return null;
+  try {
+    const url = new URL(text.replace("{size}", "640x400"));
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---- Prebook ----------------------------------------------------------------
