@@ -57,6 +57,12 @@ const NAV_ITEMS: NavItem[] = [
       { label: "Enquiries", href: "/admin/hajj-umrah-enquiries" },
     ],
   },
+  {
+    label: "Visa",
+    href: "/admin/visa-enquiries",
+    icon: FileText,
+    children: [{ label: "Enquiries", href: "/admin/visa-enquiries" }],
+  },
   { label: "eSIM", href: "/admin/esim/orders", icon: Smartphone },
   { label: "Destinations", href: "/admin/destinations", icon: MapPin },
   { label: "Trips", href: "/admin/trips", icon: Plane },
@@ -251,6 +257,7 @@ function AdminSidebar({
   const router = useRouter();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     "Hajj & Umrah": pathname.startsWith("/admin/hajj-umrah"),
+    Visa: pathname.startsWith("/admin/visa"),
     "Home CMS": pathname.startsWith("/admin/home"),
   });
 

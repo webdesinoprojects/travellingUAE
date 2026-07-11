@@ -149,7 +149,8 @@ export function VisaContactStack({
 
   async function handleApplySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const email = String(form.get("email") ?? "").trim();
     const phone = String(form.get("phone") ?? "").trim();
     const visaType = String(form.get("visaType") ?? "").trim();
@@ -184,7 +185,7 @@ export function VisaContactStack({
         type: "success",
         message: "Request received. The visa desk will contact you.",
       });
-      event.currentTarget.reset();
+      formElement.reset();
     } catch {
       setApplyStatus({
         type: "error",
@@ -195,7 +196,8 @@ export function VisaContactStack({
 
   async function handleCallSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const fullName = String(form.get("fullName") ?? "").trim();
     const email = String(form.get("email") ?? "").trim();
     const phone = String(form.get("phone") ?? "").trim();
@@ -223,7 +225,7 @@ export function VisaContactStack({
         type: "success",
         message: "Request received. We will call you back.",
       });
-      event.currentTarget.reset();
+      formElement.reset();
     } catch {
       setCallStatus({
         type: "error",
