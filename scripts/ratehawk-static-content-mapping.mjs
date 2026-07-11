@@ -1,4 +1,7 @@
 const MAX_IMAGES = 15;
+const MAX_ROOM_GROUPS = 30;
+const MAX_ROOM_GROUP_IMAGES = 8;
+const MAX_ROOM_GROUP_AMENITIES = 16;
 const MAX_AMENITIES = 80;
 const MAX_DESCRIPTION_LENGTH = 3000;
 
@@ -27,6 +30,7 @@ export function mapHotel(value, providerId, locale) {
     longitude: finite(value.longitude),
     primary_image_url: imageUrls[0] ?? null,
     image_urls: imageUrls,
+    room_groups: extractRoomGroups(value),
     amenities: extractAmenities(value),
     policies: extractPolicies(value),
     description: extractDescription(value),
@@ -78,6 +82,217 @@ export function extractImageUrls(value) {
     if (urls.length >= MAX_IMAGES) break;
   }
   return urls;
+}
+
+export function extractRoomGroups(value) {
+  if (!Array.isArray(value?.room_groups)) return null;
+
+  const groups = [];
+  const seen = new Set();
+
+  for (const entry of value.room_groups) {
+    const group = objectOrNull(entry);
+    if (!group) continue;
+
+    const images = extractRoomGroupImages(group);
+    const amenities = extractRoomGroupAmenities(group);
+    const rgExt = sanitizeRoomGroupRgExt(group.rg_ext);
+    const beds = extractRoomGroupBeds(group.beds);
+    const bedType = cleanPlainText(
+      text(group.bedding_type) ?? text(group.bed_type) ?? text(group.bed),
+      80,
+    );
+    const roomSizeSqm = readRoomSizeSqm(group);
+    const smokingLabel = extractSmokingLabel([group.smoking, group.smoking_label, ...amenities]);
+    const hasBathroom = readRoomGroupBathroom(group, rgExt, amenities);
+    const capacity = positiveInteger(rgExt.capacity) ?? positiveInteger(group.capacity);
+
+    const roomGroup = {
+      id: cleanPlainText(
+        text(group.id) ?? text(group.room_group_id) ?? text(group.room_id),
+        120,
+      ),
+      name: cleanPlainText(
+        text(group.name) ?? text(group.room_name) ?? text(group.main_name),
+        160,
+      ),
+      main_name: cleanPlainText(text(group.main_name), 160),
+      main_room_type: cleanPlainText(text(group.main_room_type), 160),
+      images,
+      amenities,
+      rg_ext: rgExt,
+      bed_type: bedType,
+      beds,
+      room_size_sqm: roomSizeSqm,
+      smoking_label: smokingLabel,
+      has_bathroom: hasBathroom,
+      capacity,
+    };
+
+    if (!roomGroup.name && !roomGroup.main_name && !roomGroup.main_room_type) continue;
+    if (images.length === 0 && amenities.length === 0 && beds.length === 0 && !roomSizeSqm && !bedType && !capacity && !hasBathroom && !smokingLabel) {
+      continue;
+    }
+
+    const key = [
+      roomGroup.id,
+      roomGroup.name,
+      roomGroup.main_name,
+      roomGroup.main_room_type,
+    ]
+      .filter(Boolean)
+      .join("|")
+      .toLowerCase();
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+
+    groups.push(dropNullRoomGroupFields(roomGroup));
+    if (groups.length >= MAX_ROOM_GROUPS) break;
+  }
+
+  return groups.length > 0 ? groups : null;
+}
+
+function extractRoomGroupImages(group) {
+  const candidates = [];
+
+  if (Array.isArray(group.images_ext)) {
+    for (const entry of group.images_ext) {
+      candidates.push(objectOrNull(entry)?.url);
+    }
+  }
+
+  if (Array.isArray(group.images)) candidates.push(...group.images);
+  if (Array.isArray(group.room_images)) candidates.push(...group.room_images);
+  if (Array.isArray(group.photos)) candidates.push(...group.photos);
+  if (Array.isArray(group.photo_urls)) candidates.push(...group.photo_urls);
+
+  const seen = new Set();
+  const urls = [];
+  for (const candidate of candidates) {
+    const url = normalizeImage(candidate);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+    if (urls.length >= MAX_ROOM_GROUP_IMAGES) break;
+  }
+  return urls;
+}
+
+function extractRoomGroupAmenities(group) {
+  const candidates = [];
+  collectAmenityValues(group.room_amenities, candidates);
+  collectAmenityValues(group.amenities, candidates);
+  collectAmenityValues(group.amenity_groups, candidates);
+  collectAmenityValues(group.serp_filters, candidates);
+
+  const seen = new Set();
+  const amenities = [];
+  for (const candidate of candidates) {
+    const normalized = cleanPlainText(candidate, 80);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    amenities.push(normalized);
+    if (amenities.length >= MAX_ROOM_GROUP_AMENITIES) break;
+  }
+  return amenities;
+}
+
+function extractRoomGroupBeds(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const beds = [];
+
+  for (const entry of value) {
+    const record = objectOrNull(entry);
+    const label = cleanPlainText(
+      text(entry) ?? text(record?.name) ?? text(record?.type) ?? text(record?.bedding_type),
+      80,
+    );
+    if (!label) continue;
+    const count = positiveInteger(record?.count);
+    const display = count && count > 1 ? `${count} ${label}` : label;
+    const key = display.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    beds.push(display);
+    if (beds.length >= 6) break;
+  }
+
+  return beds;
+}
+
+function sanitizeRoomGroupRgExt(value) {
+  const source = objectOrNull(value);
+  if (!source) return {};
+  const safe = {};
+  for (const key of ["class", "quality", "sex", "bathroom", "bedding", "family", "capacity", "club", "balcony", "view"]) {
+    const raw = source[key];
+    if (
+      typeof raw === "string" ||
+      typeof raw === "boolean" ||
+      (typeof raw === "number" && Number.isFinite(raw))
+    ) {
+      safe[key] = raw;
+    }
+  }
+  return safe;
+}
+
+function readRoomSizeSqm(group) {
+  const candidates = [
+    group.room_area,
+    group.room_size,
+    group.area,
+    group.size,
+    group.square_meters,
+    group.sqm,
+  ];
+
+  for (const candidate of candidates) {
+    const record = objectOrNull(candidate);
+    const value =
+      finite(candidate) ??
+      finite(record?.square_meters) ??
+      finite(record?.sqm) ??
+      finite(record?.value);
+    if (value !== null && value > 0 && value < 1000) return value;
+  }
+
+  return null;
+}
+
+function extractSmokingLabel(values) {
+  const labels = values
+    .map((value) => text(value)?.toLowerCase())
+    .filter(Boolean);
+
+  if (labels.some((label) => label.includes("non-smoking") || label.includes("non smoking"))) {
+    return "Non-smoking";
+  }
+  if (labels.some((label) => label === "smoking" || label.includes("smoking room"))) {
+    return "Smoking";
+  }
+  return null;
+}
+
+function readRoomGroupBathroom(group, rgExt, amenities) {
+  if (typeof group.has_bathroom === "boolean") return group.has_bathroom;
+  if (positiveInteger(rgExt.bathroom)) return true;
+  return amenities.some((amenity) => amenity.toLowerCase().includes("bathroom")) ? true : null;
+}
+
+function dropNullRoomGroupFields(group) {
+  const output = {};
+  for (const [key, value] of Object.entries(group)) {
+    if (value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0) continue;
+    output[key] = value;
+  }
+  return output;
 }
 
 export function extractAmenities(value) {

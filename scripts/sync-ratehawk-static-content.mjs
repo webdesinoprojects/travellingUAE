@@ -20,6 +20,7 @@ const validModes = new Set([
   "sync-sample",
   "sync-targeted",
   "sync-recent-search-hotels",
+  "sync-rich-batch",
   "backfill-regions",
 ]);
 
@@ -33,6 +34,7 @@ if (!validModes.has(mode)) {
       "  node scripts/sync-ratehawk-static-content.mjs sync-sample [--limit=10] [--scan-limit=500]",
       "  node scripts/sync-ratehawk-static-content.mjs sync-targeted --hotel-ids=id1,id2,id3 [--hids=123,456] [--limit=50] [--scan-limit=200000]",
       "  node scripts/sync-ratehawk-static-content.mjs sync-recent-search-hotels [--limit=50] [--hours=24] [--scan-limit=200000]",
+      "  node scripts/sync-ratehawk-static-content.mjs sync-rich-batch [--max-upserts=10000] [--batch-size=100] [--pause-ms=750] [--inventory=all] [--skip-lines=0] [--start-after-hotel-id=id]",
       "  node scripts/sync-ratehawk-static-content.mjs backfill-regions [--insert-missing]",
     ].join("\n"),
   );
@@ -63,6 +65,11 @@ const STATIC_DUMP_ENDPOINT = "/api/b2b/v3/hotel/info/dump/";
 const TARGETED_LIMIT_MAX = 50;
 const TARGETED_SCAN_LIMIT_MAX = 200_000;
 const RECENT_SEARCH_HOURS_MAX = 168;
+const RICH_BATCH_MAX_UPSERTS = 10_000;
+const RICH_BATCH_MAX_BATCH_SIZE = 100;
+const RICH_BATCH_DEFAULT_PAUSE_MS = 750;
+const RICH_BATCH_MAX_PAUSE_MS = 60_000;
+const RICH_BATCH_MAX_SKIP_LINES = 10_000_000;
 
 if (mode === "inspect-dump") {
   await inspectDumpAccess();
@@ -74,6 +81,8 @@ if (mode === "inspect-dump") {
   await syncTargeted();
 } else if (mode === "sync-recent-search-hotels") {
   await syncRecentSearchHotels();
+} else if (mode === "sync-rich-batch") {
+  await syncRichBatch();
 } else if (mode === "backfill-regions") {
   await backfillRegions();
 } else {
@@ -385,6 +394,213 @@ async function syncRecentSearchHotels() {
   });
 }
 
+async function syncRichBatch() {
+  const maxUpserts = numericOption("max-upserts", 1_000, 1, RICH_BATCH_MAX_UPSERTS);
+  const batchSize = numericOption("batch-size", RICH_BATCH_MAX_BATCH_SIZE, 1, RICH_BATCH_MAX_BATCH_SIZE);
+  const pauseMs = numericOption("pause-ms", RICH_BATCH_DEFAULT_PAUSE_MS, 0, RICH_BATCH_MAX_PAUSE_MS);
+  const skipLines = numericOption("skip-lines", 0, 0, RICH_BATCH_MAX_SKIP_LINES);
+  const startAfterHotelId = readStartAfterHotelId();
+
+  const supabase = createSupabaseClient();
+  const provider = await loadProvider(supabase);
+  const beforeDb = await measureProviderHotelContentFootprint(supabase, provider.id);
+  const dump = await requestDump(STATIC_DUMP_ENDPOINT, { language, inventory });
+  const lines = await openDumpLines(dump.url);
+
+  let scanned = 0;
+  let skipped = 0;
+  let skippedForResume = 0;
+  let skippedNotUseful = 0;
+  let skippedInvalid = 0;
+  let upserted = 0;
+  let batchNumber = 0;
+  let batch = [];
+  let lastProcessedHotelId = null;
+  let waitingForStartAfter = Boolean(startAfterHotelId);
+  let startAfterFound = !startAfterHotelId;
+
+  try {
+    for await (const rawLine of lines) {
+      const value = parseDumpLine(rawLine);
+      if (!value) continue;
+      scanned += 1;
+
+      if (scanned <= skipLines) {
+        skipped += 1;
+        skippedForResume += 1;
+        continue;
+      }
+
+      if (waitingForStartAfter) {
+        const identifiers = dumpHotelIdentifiers(value);
+        skipped += 1;
+        skippedForResume += 1;
+        if (identifiers.includes(startAfterHotelId)) {
+          waitingForStartAfter = false;
+          startAfterFound = true;
+        }
+        continue;
+      }
+
+      const row = mapHotel(value, provider.id, language);
+      if (!row) {
+        skipped += 1;
+        skippedInvalid += 1;
+        continue;
+      }
+
+      lastProcessedHotelId = row.hotel_id;
+      if (!isRichUsefulHotelRow(row)) {
+        skipped += 1;
+        skippedNotUseful += 1;
+        continue;
+      }
+
+      batch.push(row);
+      if (batch.length >= batchSize || upserted + batch.length >= maxUpserts) {
+        const written = await flushRichBatch({
+          supabase,
+          batch,
+          batchNumber: batchNumber + 1,
+          scanned,
+          skipped,
+          upserted,
+          pauseMs,
+          lastProcessedHotelId,
+        });
+        upserted += written;
+        batchNumber += 1;
+        batch = [];
+        if (upserted >= maxUpserts) break;
+      }
+    }
+  } finally {
+    lines.close();
+  }
+
+  if (batch.length > 0 && upserted < maxUpserts) {
+    const remaining = maxUpserts - upserted;
+    const toWrite = batch.slice(0, remaining);
+    const written = await flushRichBatch({
+      supabase,
+      batch: toWrite,
+      batchNumber: batchNumber + 1,
+      scanned,
+      skipped,
+      upserted,
+      pauseMs: 0,
+      lastProcessedHotelId,
+    });
+    upserted += written;
+    batchNumber += 1;
+  }
+
+  const afterDb = await measureProviderHotelContentFootprint(supabase, provider.id);
+
+  console.info(
+    JSON.stringify(
+      {
+        event: "rich_batch_complete",
+        mode,
+        provider_env: providerEnv,
+        base_url: baseUrl,
+        endpoint: STATIC_DUMP_ENDPOINT,
+        language,
+        inventory,
+        max_upserts: maxUpserts,
+        batch_size: batchSize,
+        pause_ms: pauseMs,
+        skip_lines: skipLines,
+        start_after_hotel_id: startAfterHotelId,
+        start_after_found: startAfterFound,
+        scanned,
+        upserted,
+        skipped,
+        skipped_for_resume: skippedForResume,
+        skipped_invalid: skippedInvalid,
+        skipped_not_useful: skippedNotUseful,
+        batches: batchNumber,
+        last_processed_hotel_id: lastProcessedHotelId,
+        db_before: beforeDb,
+        db_after: afterDb,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function flushRichBatch({
+  supabase,
+  batch,
+  batchNumber,
+  scanned,
+  skipped,
+  upserted,
+  pauseMs,
+  lastProcessedHotelId,
+}) {
+  const written = await upsertProviderHotelRows(supabase, batch);
+  const nextUpserted = upserted + written;
+  console.info(
+    JSON.stringify({
+      event: "rich_batch_progress",
+      batch: batchNumber,
+      scanned,
+      upserted: nextUpserted,
+      skipped,
+      batch_size: written,
+      last_processed_hotel_id: lastProcessedHotelId,
+    }),
+  );
+  if (pauseMs > 0) await sleep(pauseMs);
+  return written;
+}
+
+async function upsertProviderHotelRows(supabase, rows) {
+  if (rows.length === 0) return 0;
+  const result = await supabase
+    .from("provider_hotel_content")
+    .upsert(rows, { onConflict: "provider_id,hotel_id,language" });
+  if (result.error) throw result.error;
+  return rows.length;
+}
+
+async function measureProviderHotelContentFootprint(supabase, providerId) {
+  const result = await supabase
+    .from("provider_hotel_content")
+    .select("hotel_id", { count: "exact", head: true })
+    .eq("provider_id", providerId)
+    .eq("language", language);
+
+  return {
+    exact_size_available: false,
+    exact_size_note:
+      "No existing Supabase RPC/admin SQL helper is available for pg_total_relation_size; reporting exact row count only.",
+    row_count_available: !result.error,
+    row_count: result.error ? null : result.count,
+    row_count_error: result.error ? safeErrorCode(result.error) : null,
+  };
+}
+
+function isRichUsefulHotelRow(row) {
+  if (!row.hotel_id || !row.name) return false;
+  return (
+    (Array.isArray(row.image_urls) && row.image_urls.length > 0) ||
+    (Array.isArray(row.room_groups) && row.room_groups.length > 0) ||
+    (Array.isArray(row.amenities) && row.amenities.length > 0) ||
+    Boolean(row.description)
+  );
+}
+
+function readStartAfterHotelId() {
+  const raw = optionValue("start-after-hotel-id");
+  if (!raw) return null;
+  const normalized = targetText(raw);
+  if (!normalized) throw new Error("--start-after-hotel-id must be a valid hotel id or HID");
+  return normalized;
+}
+
 async function syncTargetRows({
   supabase: providedSupabase,
   provider: providedProvider,
@@ -607,7 +823,7 @@ async function verifySampleRows(supabase, providerId, hotelIds) {
   const result = await supabase
     .from("provider_hotel_content")
     .select(
-      "hotel_id,name,address,star_rating,latitude,longitude,region_id,region_name,region_country_code,primary_image_url,image_urls,amenities,description,policies",
+      "hotel_id,name,address,star_rating,latitude,longitude,region_id,region_name,region_country_code,primary_image_url,image_urls,room_groups,amenities,description,policies",
     )
     .eq("provider_id", providerId)
     .eq("language", language)
@@ -616,6 +832,7 @@ async function verifySampleRows(supabase, providerId, hotelIds) {
 
   const rows = (result.data ?? []).map((row) => {
     const imageUrls = Array.isArray(row.image_urls) ? row.image_urls : null;
+    const roomGroups = Array.isArray(row.room_groups) ? row.room_groups : null;
     const amenities = Array.isArray(row.amenities) ? row.amenities : null;
     return {
       hotel_id: row.hotel_id,
@@ -624,6 +841,12 @@ async function verifySampleRows(supabase, providerId, hotelIds) {
       image_urls_within_max_15: imageUrls ? imageUrls.length <= 15 : true,
       primary_image_url_set_when_images:
         !imageUrls || imageUrls.length === 0 ? true : Boolean(row.primary_image_url),
+      room_groups_is_array_or_null: row.room_groups === null || Array.isArray(row.room_groups),
+      room_groups_count: roomGroups ? roomGroups.length : 0,
+      room_groups_within_max_30: roomGroups ? roomGroups.length <= 30 : true,
+      room_group_images_within_max_8: roomGroups
+        ? roomGroups.every((group) => !Array.isArray(group?.images) || group.images.length <= 8)
+        : true,
       amenities_is_array: Array.isArray(row.amenities),
       amenities_count: amenities ? amenities.length : 0,
       description_ok: row.description === null || typeof row.description === "string",
@@ -882,6 +1105,10 @@ function numericOption(name, fallback, min, max) {
     throw new Error(`--${name} must be an integer between ${min} and ${max}`);
   }
   return parsed;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function loadEnvFile(path) {

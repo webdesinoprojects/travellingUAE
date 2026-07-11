@@ -6,6 +6,7 @@ import {
   extractDescription,
   extractImageUrls,
   extractPolicies,
+  extractRoomGroups,
   mapHotel,
 } from "./ratehawk-static-content-mapping.mjs";
 
@@ -48,6 +49,57 @@ test("mapHotel chooses first extracted image as primary image", () => {
     "https://cdn.example.test/b/640x400.jpg",
     "https://cdn.example.test/a/640x400.jpg",
   ]);
+});
+
+test("extractRoomGroups stores sanitized real room group data with capped images", () => {
+  const groups = extractRoomGroups({
+    room_groups: [
+      {
+        id: "rg1",
+        name: "Double room",
+        main_name: "Double room",
+        main_room_type: "Double room",
+        images_ext: Array.from({ length: 12 }, (_, index) => ({
+          url: `https://cdn.example.test/room/${index}/{size}.jpg`,
+        })),
+        room_amenities: [" Safe ", "Coffee", "Safe", "<b>Air conditioning</b>"],
+        rg_ext: { capacity: 2, bathroom: 2, unsafe_payload: { no: true } },
+        bedding_type: "full double bed",
+        beds: [{ name: "single bed", count: 2 }],
+        room_size: { square_meters: 21 },
+        smoking: "non-smoking",
+        has_bathroom: true,
+      },
+      {
+        name: "Broken room",
+        images_ext: [{ url: "http://cdn.example.test/not-allowed.jpg" }],
+      },
+    ],
+  });
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].name, "Double room");
+  assert.equal(groups[0].images.length, 8);
+  assert.equal(groups[0].images[0], "https://cdn.example.test/room/0/640x400.jpg");
+  assert.deepEqual(groups[0].amenities, ["Safe", "Coffee", "Air conditioning"]);
+  assert.deepEqual(groups[0].rg_ext, { bathroom: 2, capacity: 2 });
+  assert.equal(groups[0].bed_type, "full double bed");
+  assert.deepEqual(groups[0].beds, ["2 single bed"]);
+  assert.equal(groups[0].room_size_sqm, 21);
+  assert.equal(groups[0].smoking_label, "Non-smoking");
+  assert.equal(groups[0].has_bathroom, true);
+  assert.equal(groups[0].capacity, 2);
+});
+
+test("extractRoomGroups caps room groups at 30 and returns null when missing", () => {
+  assert.equal(extractRoomGroups({}), null);
+  const groups = extractRoomGroups({
+    room_groups: Array.from({ length: 40 }, (_, index) => ({
+      name: `Room ${index}`,
+      images: [`https://cdn.example.test/${index}.jpg`],
+    })),
+  });
+  assert.equal(groups.length, 30);
 });
 
 test("extractAmenities accepts nested provider groups and removes junk", () => {
