@@ -32,6 +32,11 @@ export type VisaDestination = {
   priceLabel: string;
   image: string;
   alt: string;
+  // Static media hooks for now; move these to Visa CMS/ImageKit when that phase starts.
+  processImage?: string;
+  processImageAlt?: string;
+  sampleVisaImage?: string;
+  sampleVisaImageAlt?: string;
   detailTitle: string;
   approvalText: string;
   processingTime: string;

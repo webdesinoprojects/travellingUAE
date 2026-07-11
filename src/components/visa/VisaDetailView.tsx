@@ -30,8 +30,27 @@ const detailNav = [
   { href: "#visit-us", label: "Visit Us" },
 ];
 
+const supportedVisaMediaHosts = new Set([
+  "ik.imagekit.io",
+  "images.unsplash.com",
+  "res.cloudinary.com",
+]);
+
 export function VisaDetailView({ page, destination }: VisaDetailViewProps) {
   const [modal, setModal] = useState<"process" | "sample" | null>(null);
+
+  function handleModalApply() {
+    setModal(null);
+    window.setTimeout(() => {
+      const applySection = document.getElementById("visa-apply");
+      applySection?.scrollIntoView({ behavior: "smooth", block: "start" });
+      applySection
+        ?.querySelector<HTMLInputElement | HTMLSelectElement>(
+          "input, select",
+        )
+        ?.focus({ preventScroll: true });
+    }, 0);
+  }
 
   return (
     <main className="min-h-screen bg-background pb-20 text-foreground">
@@ -266,7 +285,7 @@ export function VisaDetailView({ page, destination }: VisaDetailViewProps) {
           />
         </div>
 
-        <aside className="lg:sticky lg:top-28 lg:self-start">
+        <aside id="visa-apply" className="scroll-mt-28 lg:sticky lg:top-28 lg:self-start">
           <VisaContactStack destination={destination} />
         </aside>
       </section>
@@ -275,6 +294,7 @@ export function VisaDetailView({ page, destination }: VisaDetailViewProps) {
         <VisaModal
           type={modal}
           destination={destination}
+          onApply={handleModalApply}
           onClose={() => setModal(null)}
         />
       ) : null}
@@ -376,34 +396,82 @@ function InfoSection({
 function VisaModal({
   type,
   destination,
+  onApply,
   onClose,
 }: {
   type: "process" | "sample";
   destination: VisaDestination;
+  onApply: () => void;
   onClose: () => void;
 }) {
+  const title =
+    type === "process"
+      ? `${destination.name} visa process`
+      : `${destination.name} sample visa`;
+
   return (
     <div className="fixed inset-0 z-[90] grid place-items-center bg-black/68 p-4 backdrop-blur-sm">
-      <section className="relative max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-surface p-5 shadow-[0_24px_80px_rgb(0_0_0/0.34)] dark:bg-brand-navy">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 grid size-10 place-items-center rounded-full bg-brand-navy text-white dark:bg-white dark:text-brand-navy"
-          aria-label="Close modal"
-        >
-          <X aria-hidden="true" className="size-4" />
-        </button>
-        {type === "process" ? (
-          <ProcessGraphic destination={destination} />
-        ) : (
-          <SampleVisaGraphic destination={destination} />
-        )}
+      <section className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-surface shadow-[0_24px_80px_rgb(0_0_0/0.34)] dark:bg-brand-navy">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border-soft bg-surface/96 px-5 py-4 backdrop-blur-xl dark:bg-brand-navy/96">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-brown">
+              Visa media
+            </p>
+            <h2 className="mt-1 font-serif text-2xl font-black text-brand-navy dark:text-white">
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-navy text-white transition hover:bg-brand-blue dark:bg-white dark:text-brand-navy"
+            aria-label="Close modal"
+          >
+            <X aria-hidden="true" className="size-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+          {type === "process" ? (
+            <ProcessGraphic destination={destination} onApply={onApply} />
+          ) : (
+            <SampleVisaGraphic destination={destination} />
+          )}
+        </div>
       </section>
     </div>
   );
 }
 
-function ProcessGraphic({ destination }: { destination: VisaDestination }) {
+function ProcessGraphic({
+  destination,
+  onApply,
+}: {
+  destination: VisaDestination;
+  onApply: () => void;
+}) {
+  const image = getSafeVisaMediaImage(destination.processImage);
+
+  if (image) {
+    return (
+      <div className="grid gap-4">
+        <VisaMediaImage
+          src={image}
+          alt={
+            destination.processImageAlt ??
+            `${destination.name} visa process and requirements`
+          }
+        />
+        <button
+          type="button"
+          onClick={onApply}
+          className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-brand-navy px-5 text-sm font-black uppercase tracking-[0.14em] text-white transition hover:bg-brand-blue sm:w-auto dark:bg-brand-sand dark:text-brand-navy"
+        >
+          Apply now
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg bg-[linear-gradient(135deg,#c2e8ff,#77e4ca,#f2d19d)] p-8 text-center text-brand-navy">
       <p className="text-sm font-black uppercase tracking-[0.18em]">
@@ -430,14 +498,32 @@ function ProcessGraphic({ destination }: { destination: VisaDestination }) {
           </li>
         ))}
       </ol>
-      <p className="mt-8 rounded-lg bg-brand-blue px-5 py-4 text-lg font-black uppercase text-white">
+      <button
+        type="button"
+        onClick={onApply}
+        className="mt-8 w-full rounded-lg bg-brand-blue px-5 py-4 text-lg font-black uppercase text-white transition hover:bg-brand-navy"
+      >
         Apply now
-      </p>
+      </button>
     </div>
   );
 }
 
 function SampleVisaGraphic({ destination }: { destination: VisaDestination }) {
+  const image = getSafeVisaMediaImage(destination.sampleVisaImage);
+
+  if (image) {
+    return (
+      <VisaMediaImage
+        src={image}
+        alt={
+          destination.sampleVisaImageAlt ??
+          `${destination.name} sample visa copy`
+        }
+      />
+    );
+  }
+
   return (
     <div className="rounded-lg bg-white p-7 text-brand-navy">
       <div className="flex items-start justify-between gap-6 border-b border-brand-navy/15 pb-5">
@@ -473,4 +559,40 @@ function SampleVisaGraphic({ destination }: { destination: VisaDestination }) {
       </div>
     </div>
   );
+}
+
+function VisaMediaImage({ src, alt }: { src: string; alt: string }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border-soft bg-white p-2 dark:bg-white/[0.04]">
+      <Image
+        src={src}
+        alt={alt}
+        width={1400}
+        height={1800}
+        sizes="(max-width: 768px) calc(100vw - 48px), 840px"
+        className="mx-auto h-auto w-full max-w-full object-contain"
+      />
+    </div>
+  );
+}
+
+function getSafeVisaMediaImage(src: string | undefined) {
+  if (!src) {
+    return null;
+  }
+
+  if (src.startsWith("/")) {
+    return src;
+  }
+
+  try {
+    const url = new URL(src);
+    if (url.protocol === "https:" && supportedVisaMediaHosts.has(url.hostname)) {
+      return src;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
