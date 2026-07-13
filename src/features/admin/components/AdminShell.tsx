@@ -61,7 +61,11 @@ const NAV_ITEMS: NavItem[] = [
     label: "Visa",
     href: "/admin/visa-enquiries",
     icon: FileText,
-    children: [{ label: "Enquiries", href: "/admin/visa-enquiries" }],
+    children: [
+      { label: "Enquiries", href: "/admin/visa-enquiries" },
+      { label: "Global CMS", href: "/admin/visa/global" },
+      { label: "Gulf CMS", href: "/admin/visa/gulf" },
+    ],
   },
   { label: "eSIM", href: "/admin/esim/orders", icon: Smartphone },
   { label: "Destinations", href: "/admin/destinations", icon: MapPin },

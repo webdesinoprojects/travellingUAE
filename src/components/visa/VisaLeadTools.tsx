@@ -3,19 +3,23 @@
 import {
   ChevronRight,
   Clock3,
-  Mail,
   MessageCircle,
-  Phone,
   PhoneCall,
-  User,
-  Users,
   X,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+
 import type { VisaDestination, VisaPageContent } from "@/data/visa";
+import {
+  buildEnquiryFieldLines,
+  defaultApplyFormConfig,
+  defaultCallFormConfig,
+  defaultContactCardsConfig,
+  type VisaFormFieldConfig,
+} from "@/lib/visa-forms";
 
 type FormStatus = {
   type: "idle" | "success" | "error";
@@ -125,15 +129,26 @@ export function VisaContactStack({
   destination,
   compact = false,
 }: VisaContactStackProps) {
-  const [openPanel, setOpenPanel] = useState<"apply" | "call">("apply");
-  const [applyStatus, setApplyStatus] = useState<FormStatus>({
-    type: "idle",
-    message: "",
-  });
-  const [callStatus, setCallStatus] = useState<FormStatus>({
-    type: "idle",
-    message: "",
-  });
+  const applyForm = destination.applyForm ?? defaultApplyFormConfig();
+  const callForm = destination.callForm ?? defaultCallFormConfig();
+  const contactCards = destination.contactCards ?? defaultContactCardsConfig();
+
+  const visaTypeOptions = useMemo(
+    () => destination.visaTypes.map((visaType) => visaType.title),
+    [destination.visaTypes],
+  );
+
+  const [openPanel, setOpenPanel] = useState<"apply" | "call">(
+    applyForm.enabled ? "apply" : "call",
+  );
+  const [applyValues, setApplyValues] = useState<Record<string, string>>(() =>
+    initialValues(applyForm.fields, { travelers: String(applyForm.defaultTravellers) }),
+  );
+  const [callValues, setCallValues] = useState<Record<string, string>>(() =>
+    initialValues(callForm.fields, {}),
+  );
+  const [applyStatus, setApplyStatus] = useState<FormStatus>({ type: "idle", message: "" });
+  const [callStatus, setCallStatus] = useState<FormStatus>({ type: "idle", message: "" });
 
   async function submitContact(payload: Record<string, unknown>) {
     const response = await fetch("/api/contact", {
@@ -141,7 +156,6 @@ export function VisaContactStack({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-
     if (!response.ok) {
       throw new Error("Contact submission failed");
     }
@@ -149,88 +163,64 @@ export function VisaContactStack({
 
   async function handleApplySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const email = String(form.get("email") ?? "").trim();
-    const phone = String(form.get("phone") ?? "").trim();
-    const visaType = String(form.get("visaType") ?? "").trim();
-    const travelers = String(form.get("travelers") ?? "").trim();
-    const phoneDigits = phone.replace(/\D/g, "");
-
-    if (!isEmail(email) || phoneDigits.length < 7 || !isPositiveInteger(travelers)) {
-      setApplyStatus({
-        type: "error",
-        message: "Enter a valid email, phone number, and traveller count.",
-      });
+    const validationError = validateFields(applyForm.fields, applyValues);
+    if (validationError) {
+      setApplyStatus({ type: "error", message: validationError });
       return;
     }
 
+    const lines = buildEnquiryFieldLines(applyForm.fields, applyValues);
+    const travelersRaw = applyValues.travelers?.trim();
+    const travelers = travelersRaw ? Number(travelersRaw) : undefined;
+
     try {
       setApplyStatus({ type: "idle", message: "Submitting..." });
+      // source stays 'visa-apply-online'. Known keys map to contact fields; all
+      // enabled fields (incl. custom ones) are included in the message so they
+      // appear in /admin/visa-enquiries.
       await submitContact({
         source: "visa-apply-online",
-        fullName: "Visa applicant",
-        email,
-        phone: phoneDigits,
+        fullName: applyValues.fullName?.trim() || "Visa applicant",
+        email: applyValues.email?.trim() || undefined,
+        phone: digits(applyValues.phone),
         subject: `${destination.name} visa application enquiry`,
         message: [
           `${destination.name} visa application enquiry`,
-          `Visa type: ${visaType}`,
-          `Travelers: ${travelers}`,
+          ...lines,
           `Starting price: ${destination.startingFrom}`,
         ].join("\n"),
-        travelers: Number(travelers),
+        ...(travelers && Number.isFinite(travelers) ? { travelers } : {}),
       });
-      setApplyStatus({
-        type: "success",
-        message: "Request received. The visa desk will contact you.",
-      });
-      formElement.reset();
+      setApplyStatus({ type: "success", message: "Request received. The visa desk will contact you." });
+      setApplyValues(initialValues(applyForm.fields, { travelers: String(applyForm.defaultTravellers) }));
     } catch {
-      setApplyStatus({
-        type: "error",
-        message: "Could not submit right now. Please try again shortly.",
-      });
+      setApplyStatus({ type: "error", message: "Could not submit right now. Please try again shortly." });
     }
   }
 
   async function handleCallSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const fullName = String(form.get("fullName") ?? "").trim();
-    const email = String(form.get("email") ?? "").trim();
-    const phone = String(form.get("phone") ?? "").trim();
-    const phoneDigits = phone.replace(/\D/g, "");
-
-    if (fullName.length < 2 || !isEmail(email) || phoneDigits.length < 7) {
-      setCallStatus({
-        type: "error",
-        message: "Enter a valid name, email, and contact number.",
-      });
+    const validationError = validateFields(callForm.fields, callValues);
+    if (validationError) {
+      setCallStatus({ type: "error", message: validationError });
       return;
     }
 
+    const lines = buildEnquiryFieldLines(callForm.fields, callValues);
     try {
       setCallStatus({ type: "idle", message: "Submitting..." });
       await submitContact({
         source: "visa-call-request",
-        fullName,
-        email,
-        phone: phoneDigits,
+        fullName: callValues.fullName?.trim() || "Visa call request",
+        email: callValues.email?.trim() || undefined,
+        phone: digits(callValues.phone),
         subject: `${destination.name} visa call request`,
-        message: `Call back requested for ${destination.name} visa support.`,
+        message: [`Call back requested for ${destination.name} visa support.`, ...lines].join("\n"),
       });
-      setCallStatus({
-        type: "success",
-        message: "Request received. We will call you back.",
-      });
-      formElement.reset();
+      setCallStatus({ type: "success", message: "Request received. We will call you back." });
+      setCallValues(initialValues(callForm.fields, {}));
     } catch {
-      setCallStatus({
-        type: "error",
-        message: "Could not submit right now. Please try again shortly.",
-      });
+      setCallStatus({ type: "error", message: "Could not submit right now. Please try again shortly." });
     }
   }
 
@@ -242,139 +232,174 @@ export function VisaContactStack({
           : "grid gap-4 rounded-lg border border-border-soft bg-brand-blue p-3 dark:bg-brand-navy"
       }
     >
-      <div className="rounded-lg bg-brand-sand px-4 py-3 text-sm font-bold text-brand-navy">
-        It takes less than 2 minutes to apply.
-      </div>
+      {contactCards.helperText ? (
+        <div className="rounded-lg bg-brand-sand px-4 py-3 text-sm font-bold text-brand-navy">
+          {contactCards.helperText}
+        </div>
+      ) : null}
 
-      <ContactAccordion
-        title="Apply Online"
-        open={openPanel === "apply"}
-        onToggle={() => setOpenPanel(openPanel === "apply" ? "call" : "apply")}
-      >
-        <form className="grid gap-4" onSubmit={handleApplySubmit} noValidate>
-          <Field label="Email ID" icon={<Mail aria-hidden="true" />}>
-            <input
-              name="email"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              placeholder="name@example.com"
-              className={fieldClassName}
-            />
-          </Field>
-          <Field label="Contact No" icon={<Phone aria-hidden="true" />}>
-            <input
-              name="phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="Contact number"
-              className={fieldClassName}
-            />
-          </Field>
-          <Field label="Visa type" icon={<ChevronRight aria-hidden="true" />}>
-            <select name="visaType" className={fieldClassName} defaultValue="">
-              <option value="" disabled>
-                Select visa type
-              </option>
-              {destination.visaTypes.map((visaType) => (
-                <option key={visaType.title} value={visaType.title}>
-                  {visaType.title}
-                </option>
+      {applyForm.enabled ? (
+        <ContactAccordion
+          title={applyForm.heading}
+          open={openPanel === "apply"}
+          onToggle={() => setOpenPanel(openPanel === "apply" ? "call" : "apply")}
+        >
+          <form className="grid gap-4" onSubmit={handleApplySubmit} noValidate>
+            {applyForm.fields
+              .filter((field) => field.enabled)
+              .map((field) => (
+                <DynamicField
+                  key={field.key}
+                  field={field}
+                  value={applyValues[field.key] ?? ""}
+                  onChange={(v) => setApplyValues((s) => ({ ...s, [field.key]: v }))}
+                  visaTypeOptions={visaTypeOptions}
+                />
               ))}
-            </select>
-          </Field>
-          <Field label="Travellers" icon={<Users aria-hidden="true" />}>
-            <input
-              name="travelers"
-              type="number"
-              min={1}
-              max={50}
-              inputMode="numeric"
-              defaultValue="1"
-              className={fieldClassName}
-            />
-          </Field>
-          <div className="text-right text-2xl font-black text-brand-navy dark:text-white">
-            {destination.startingFrom}
-          </div>
-          <button type="submit" className={primaryButtonClassName}>
-            Apply now
-          </button>
-          <FormMessage status={applyStatus} />
-        </form>
-      </ContactAccordion>
+            <div className="text-right text-2xl font-black text-brand-navy dark:text-white">
+              {destination.startingFrom}
+            </div>
+            <button type="submit" className={primaryButtonClassName}>
+              {applyForm.submitLabel}
+            </button>
+            <FormMessage status={applyStatus} />
+          </form>
+        </ContactAccordion>
+      ) : null}
 
-      <ContactAccordion
-        title="Let us Call You"
-        open={openPanel === "call"}
-        onToggle={() => setOpenPanel(openPanel === "call" ? "apply" : "call")}
-      >
-        <form className="grid gap-4" onSubmit={handleCallSubmit} noValidate>
-          <Field label="Name" icon={<User aria-hidden="true" />}>
-            <input
-              name="fullName"
-              type="text"
-              autoComplete="name"
-              placeholder="Your name"
-              className={fieldClassName}
-            />
-          </Field>
-          <Field label="Email Id" icon={<Mail aria-hidden="true" />}>
-            <input
-              name="email"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              placeholder="name@example.com"
-              className={fieldClassName}
-            />
-          </Field>
-          <Field label="Contact Number" icon={<Phone aria-hidden="true" />}>
-            <input
-              name="phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="Contact number"
-              className={fieldClassName}
-            />
-          </Field>
-          <button type="submit" className={primaryButtonClassName}>
-            Submit
-          </button>
-          <FormMessage status={callStatus} />
-        </form>
-      </ContactAccordion>
+      {callForm.enabled ? (
+        <ContactAccordion
+          title={callForm.heading}
+          open={openPanel === "call"}
+          onToggle={() => setOpenPanel(openPanel === "call" ? "apply" : "call")}
+        >
+          <form className="grid gap-4" onSubmit={handleCallSubmit} noValidate>
+            {callForm.fields
+              .filter((field) => field.enabled)
+              .map((field) => (
+                <DynamicField
+                  key={field.key}
+                  field={field}
+                  value={callValues[field.key] ?? ""}
+                  onChange={(v) => setCallValues((s) => ({ ...s, [field.key]: v }))}
+                  visaTypeOptions={visaTypeOptions}
+                />
+              ))}
+            <button type="submit" className={primaryButtonClassName}>
+              {callForm.submitLabel}
+            </button>
+            <FormMessage status={callStatus} />
+          </form>
+        </ContactAccordion>
+      ) : null}
 
-      <ContactCard
-        icon={<MessageCircle aria-hidden="true" />}
-        label="Visa on WhatsApp"
-        value="+91 8879008992"
-      />
-      <ContactCard
-        icon={<PhoneCall aria-hidden="true" />}
-        label="Call us on"
-        value="02240666444"
-      />
-      <ContactCard
-        icon={<Clock3 aria-hidden="true" />}
-        label="Timing"
-        value="9am to 9pm"
-      />
+      {contactCards.whatsapp.enabled ? (
+        <ContactCard icon={<MessageCircle aria-hidden="true" />} label={contactCards.whatsapp.label} value={contactCards.whatsapp.value} />
+      ) : null}
+      {contactCards.phone.enabled ? (
+        <ContactCard icon={<PhoneCall aria-hidden="true" />} label={contactCards.phone.label} value={contactCards.phone.value} />
+      ) : null}
+      {contactCards.timing.enabled ? (
+        <ContactCard icon={<Clock3 aria-hidden="true" />} label={contactCards.timing.label} value={contactCards.timing.value} />
+      ) : null}
     </div>
+  );
+}
+
+// ---- Dynamic field rendering ----------------------------------------------
+
+function initialValues(fields: VisaFormFieldConfig[], seed: Record<string, string>): Record<string, string> {
+  const values: Record<string, string> = { ...seed };
+  for (const field of fields) {
+    if (!(field.key in values)) values[field.key] = "";
+  }
+  return values;
+}
+
+function validateFields(fields: VisaFormFieldConfig[], values: Record<string, string>): string | null {
+  for (const field of fields) {
+    if (!field.enabled) continue;
+    const value = (values[field.key] ?? "").trim();
+    if (field.required && !value) {
+      return `Please fill in ${field.label}.`;
+    }
+    if (!value) continue;
+    if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return `Enter a valid ${field.label.toLowerCase()}.`;
+    }
+    if (field.type === "tel" && (digits(value) ?? "").length < 7) {
+      return `Enter a valid ${field.label.toLowerCase()}.`;
+    }
+    if (field.type === "number" && !(Number(value) > 0)) {
+      return `Enter a valid ${field.label.toLowerCase()}.`;
+    }
+  }
+  return null;
+}
+
+function digits(value: string | undefined): string | undefined {
+  const d = (value ?? "").replace(/\D/g, "");
+  return d || undefined;
+}
+
+function DynamicField({
+  field,
+  value,
+  onChange,
+  visaTypeOptions,
+}: {
+  field: VisaFormFieldConfig;
+  value: string;
+  onChange: (v: string) => void;
+  visaTypeOptions: string[];
+}) {
+  const options = field.optionsFromVisaTypes ? visaTypeOptions : field.options ?? [];
+
+  return (
+    <label className="grid gap-2">
+      <span className="text-sm font-black text-brand-navy dark:text-white">
+        {field.label}
+        {field.required ? <span className="ml-1 text-red-500">*</span> : null}
+      </span>
+      {field.type === "textarea" ? (
+        <textarea
+          name={field.key}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          rows={3}
+          className={`${fieldClassName} resize-y py-2`}
+        />
+      ) : field.type === "select" ? (
+        <select name={field.key} value={value} onChange={(e) => onChange(e.target.value)} className={fieldClassName}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          name={field.key}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          type={field.type === "number" ? "number" : field.type}
+          inputMode={field.type === "tel" ? "tel" : field.type === "number" ? "numeric" : field.type === "email" ? "email" : undefined}
+          min={field.type === "number" ? field.min ?? 1 : undefined}
+          placeholder={field.placeholder}
+          className={fieldClassName}
+        />
+      )}
+    </label>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border-soft bg-background p-3 dark:bg-black">
-      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-brand-brown">
-        {label}
-      </p>
-      <p className="mt-1 font-black text-brand-navy dark:text-white">
-        {value}
-      </p>
+      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-brand-brown">{label}</p>
+      <p className="mt-1 font-black text-brand-navy dark:text-white">{value}</p>
     </div>
   );
 }
@@ -401,56 +426,18 @@ function ContactAccordion({
         <span>{title}</span>
         <span className="text-2xl leading-none">{open ? "-" : "+"}</span>
       </button>
-      {open ? (
-        <div className="border-t border-border-soft px-5 py-5">{children}</div>
-      ) : null}
+      {open ? <div className="border-t border-border-soft px-5 py-5">{children}</div> : null}
     </section>
   );
 }
 
-function Field({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <label className="grid gap-2">
-      <span className="flex items-center gap-2 text-sm font-black text-brand-navy dark:text-white">
-        <span className="text-brand-blue dark:text-brand-sand [&>svg]:size-4">
-          {icon}
-        </span>
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function ContactCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
+function ContactCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center gap-4 rounded-lg bg-surface px-5 py-4 dark:bg-white/[0.05]">
-      <span className="text-brand-blue dark:text-brand-sand [&>svg]:size-5">
-        {icon}
-      </span>
-      <span>
-        <span className="block text-sm font-semibold text-foreground-muted">
-          {label}
-        </span>
-        <span className="block text-xl font-black text-brand-navy dark:text-white">
-          {value}
-        </span>
+      <span className="text-brand-blue dark:text-brand-sand [&>svg]:size-5">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-foreground-muted">{label}</span>
+        <span className="block break-words text-xl font-black text-brand-navy dark:text-white">{value}</span>
       </span>
     </div>
   );
@@ -475,15 +462,6 @@ function FormMessage({ status }: { status: FormStatus }) {
       {status.message}
     </p>
   );
-}
-
-function isEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function isPositiveInteger(value: string) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 && parsed <= 50;
 }
 
 const fieldClassName =

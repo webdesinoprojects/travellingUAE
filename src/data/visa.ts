@@ -23,6 +23,14 @@ export type VisaFaq = {
   answer: string;
 };
 
+// CMS form configuration (stored in visa_destinations.metadata). Optional on the
+// destination: absent => the public forms use their hardcoded defaults.
+import type {
+  VisaApplyFormConfig,
+  VisaCallFormConfig,
+  VisaContactCardsConfig,
+} from "@/lib/visa-forms";
+
 export type VisaDestination = {
   slug: string;
   name: string;
@@ -50,6 +58,10 @@ export type VisaDestination = {
   faqs: VisaFaq[];
   embassyNote: string;
   visitUsNote: string;
+  /** CMS-configurable public forms + contact cards (undefined => defaults). */
+  applyForm?: VisaApplyFormConfig;
+  callForm?: VisaCallFormConfig;
+  contactCards?: VisaContactCardsConfig;
 };
 
 export type VisaPageContent = {
